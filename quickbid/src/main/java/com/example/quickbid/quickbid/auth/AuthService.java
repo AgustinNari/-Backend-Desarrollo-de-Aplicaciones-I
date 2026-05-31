@@ -6,6 +6,7 @@ import com.example.quickbid.quickbid.common.security.JwtUtil;
 import com.example.quickbid.quickbid.usuario.Usuario;
 import com.example.quickbid.quickbid.usuario.UsuarioRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -16,6 +17,7 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class AuthService {
 
     private final RegistroTemporalRepository registroTemporalRepository;
@@ -60,7 +62,8 @@ public class AuthService {
         registroTemporalRepository.save(registro);
 
         // TODO: enviar email con el token cuando se configure spring-boot-starter-mail
-        // Por ahora el token queda en la BD (visible desde H2 console)
+        // DEV: token impreso en consola para pruebas (remover en producción)
+        log.info("[DEV] Token de verificación para {}: {}", registro.getEmail(), token);
     }
 
     // ─── Verificar token de email ─────────────────────────────────────────────
