@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -78,6 +79,7 @@ public class AuthService {
 
     // ─── Etapa 3: crear clave y finalizar registro ────────────────────────────
 
+    @Transactional
     public void etapa3(Etapa3Request req) {
         RegistroTemporal registro = getRegistroPendiente(req.getEmail());
 
@@ -128,25 +130,26 @@ public class AuthService {
     }
 
     // ─── Recuperar clave ──────────────────────────────────────────────────────
+    // Decisión de diseño: siempre devuelve OK aunque el email no exista.
+    // Esto evita revelar si una dirección está registrada o no (enumeration attack).
 
     public void recuperarClave(RecuperarClaveRequest req) {
-        Usuario usuario = usuarioRepository.findByEmail(req.getEmail())
-                .orElseThrow(() -> new AppException("Email no registrado", HttpStatus.NOT_FOUND));
+        usuarioRepository.findByEmail(req.getEmail()).ifPresent(usuario -> {
+            RegistroTemporal temp = registroTemporalRepository.findByEmail(usuario.getEmail())
+                    .orElse(RegistroTemporal.builder().email(usuario.getEmail()).build());
 
-        // Reutilizamos RegistroTemporal para guardar el token de recuperación
-        RegistroTemporal temp = registroTemporalRepository.findByEmail(usuario.getEmail())
-                .orElse(RegistroTemporal.builder().email(usuario.getEmail()).build());
+            String token = UUID.randomUUID().toString();
+            temp.setTokenVerificacion(token);
+            temp.setTokenExpiracion(LocalDateTime.now().plusHours(1));
+            registroTemporalRepository.save(temp);
 
-        String token = UUID.randomUUID().toString();
-        temp.setTokenVerificacion(token);
-        temp.setTokenExpiracion(LocalDateTime.now().plusHours(1));
-        registroTemporalRepository.save(temp);
-
-        // TODO: enviar email con el link de recuperación
+            // TODO: enviar email con el link de recuperación
+        });
     }
 
     // ─── Cambiar clave ────────────────────────────────────────────────────────
 
+    @Transactional
     public void cambiarClave(CambiarClaveRequest req) {
         RegistroTemporal temp = registroTemporalRepository.findByTokenVerificacion(req.getToken())
                 .orElseThrow(() -> new AppException("Token inválido", HttpStatus.BAD_REQUEST));
