@@ -1,1 +1,3 @@
 quickbid/src/main/resources/application.properties
+quickbid/quickbiddb.mv.db
+quickbid/quickbiddb.trace.db
