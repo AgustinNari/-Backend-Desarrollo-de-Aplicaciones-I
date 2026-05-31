@@ -116,6 +116,7 @@ public class AuthService {
         registroTemporalRepository.save(registro);
 
         // TODO: enviar email
+        log.info("[DEV] Token de verificación para {}: {}", registro.getEmail(), token);
     }
 
     // ─── Login ────────────────────────────────────────────────────────────────
@@ -147,6 +148,7 @@ public class AuthService {
             registroTemporalRepository.save(temp);
 
             // TODO: enviar email con el link de recuperación
+            log.info("[DEV] Token de recuperación para {}: {}", usuario.getEmail(), token);
         });
     }
 
