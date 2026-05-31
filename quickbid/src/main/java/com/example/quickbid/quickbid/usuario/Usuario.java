@@ -3,7 +3,6 @@ package com.example.quickbid.quickbid.usuario;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.time.LocalDate;
 
 @Entity
 @Table(name = "usuarios")
@@ -30,13 +29,13 @@ public class Usuario {
     @Column(nullable = false)
     private String clave; // bcrypt hash
 
-    private String telefono;
+    @Column(nullable = false)
+    @Builder.Default
+    private String categoria = "comun"; // comun | especial | plata | oro | platino
 
-    private LocalDate fechaNacimiento;
-
-    private String domicilio;
-
-    private String fotoDni; // path o URL de la foto del DNI
+    @Column(nullable = false)
+    @Builder.Default
+    private String estadoCuenta = "activo"; // activo | bloqueado | activo_sin_medio_pago
 
     @Column(nullable = false)
     @Builder.Default

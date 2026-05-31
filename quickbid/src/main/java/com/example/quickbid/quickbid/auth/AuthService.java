@@ -7,11 +7,14 @@ import com.example.quickbid.quickbid.usuario.Usuario;
 import com.example.quickbid.quickbid.usuario.UsuarioRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -21,13 +24,18 @@ import java.util.UUID;
 public class AuthService {
 
     private final RegistroTemporalRepository registroTemporalRepository;
+    private final DocumentoIdentidadRepository documentoIdentidadRepository;
     private final UsuarioRepository usuarioRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
 
+    // 0 = sin expiracion (util para testing). Cualquier otro valor = minutos de vigencia.
+    @Value("${auth.setup-token.expiracion-minutos:15}")
+    private int setupTokenExpiracionMinutos;
+
     // ─── Etapa 1: datos personales ────────────────────────────────────────────
 
-    public void etapa1(Etapa1Request req) {
+    public Etapa1Response etapa1(Etapa1Request req) {
         String email = req.getEmail();
 
         if (usuarioRepository.existsByEmail(email)) {
@@ -39,103 +47,155 @@ public class AuthService {
 
         registro.setNombre(req.getNombre());
         registro.setApellido(req.getApellido());
-        registro.setTelefono(req.getTelefono());
-        registro.setDomicilio(req.getDomicilio());
+        registro.setDomicilioLegal(req.getDomicilioLegal());
+        registro.setIdPaisOrigen(req.getIdPaisOrigen());
         registro.setEtapa(RegistroTemporal.EtapaRegistro.ETAPA_1);
 
-        registroTemporalRepository.save(registro);
+        RegistroTemporal saved = registroTemporalRepository.save(registro);
+        return new Etapa1Response(saved.getId(), "etapa2_fotos_dni");
     }
 
-    // ─── Etapa 2: foto del DNI ────────────────────────────────────────────────
+    // ─── Etapa 2: fotos del DNI (frente + dorso) ─────────────────────────────
 
-    public void etapa2(Etapa2Request req) {
-        RegistroTemporal registro = getRegistroPendiente(req.getEmail());
+    public void etapa2(String email, MultipartFile fotoFrenteDni, MultipartFile fotoDorsoDni) {
+        RegistroTemporal registro = getRegistroPendiente(email);
 
-        registro.setFotoDni(req.getFotoDni());
+        if (registro.getEtapa() != RegistroTemporal.EtapaRegistro.ETAPA_1) {
+            throw new AppException("Las fotos ya fueron subidas previamente", HttpStatus.CONFLICT);
+        }
 
-        // Generar token de verificación (en producción se enviaría por email)
+        try {
+            registro.setFotoFrenteDni(fotoFrenteDni.getBytes());
+            registro.setFotoDorsoDni(fotoDorsoDni.getBytes());
+        } catch (IOException e) {
+            throw new AppException("Error al procesar las imagenes", HttpStatus.BAD_REQUEST);
+        }
+
+        // Generar token de verificacion (en produccion se envia por email)
         String token = UUID.randomUUID().toString();
         registro.setTokenVerificacion(token);
-        registro.setTokenExpiracion(LocalDateTime.now().plusHours(24));
+        registro.setTokenExpiracion(LocalDateTime.now().plusHours(48));
         registro.setEtapa(RegistroTemporal.EtapaRegistro.ETAPA_2);
 
         registroTemporalRepository.save(registro);
 
-        // TODO: enviar email con el token cuando se configure spring-boot-starter-mail
-        // DEV: token impreso en consola para pruebas (remover en producción)
-        log.info("[DEV] Token de verificación para {}: {}", registro.getEmail(), token);
+        // TODO: enviar email con el link de verificacion
+        log.info("[DEV] Token de verificacion para {}: {}", email, token);
     }
 
-    // ─── Verificar token de email ─────────────────────────────────────────────
+    // ─── Verificar token del link ─────────────────────────────────────────────
 
-    public void verificarToken(VerificarTokenRequest req) {
+    public VerificarTokenResponse verificarToken(VerificarTokenRequest req) {
         RegistroTemporal registro = registroTemporalRepository.findByTokenVerificacion(req.getToken())
-                .orElseThrow(() -> new AppException("Token inválido", HttpStatus.BAD_REQUEST));
+                .orElseThrow(() -> new AppException("Enlace invalido", HttpStatus.BAD_REQUEST));
 
         if (registro.getTokenExpiracion().isBefore(LocalDateTime.now())) {
-            throw new AppException("El token ha expirado", HttpStatus.BAD_REQUEST);
+            throw new AppException("El token expiro", HttpStatus.GONE);
         }
 
+        // Generar setup_token para usar en etapa3
+        String setupToken = UUID.randomUUID().toString();
+        registro.setSetupToken(setupToken);
+        // Si expiracion=0 se deshabilita (util para testing local)
+        registro.setSetupTokenExpiracion(setupTokenExpiracionMinutos > 0
+                ? LocalDateTime.now().plusMinutes(setupTokenExpiracionMinutos)
+                : null);
+        registro.setTokenVerificacion(null); // invalidar el link usado
         registro.setEtapa(RegistroTemporal.EtapaRegistro.VERIFICADO);
         registroTemporalRepository.save(registro);
+
+        return new VerificarTokenResponse(setupToken);
     }
 
     // ─── Etapa 3: crear clave y finalizar registro ────────────────────────────
 
     @Transactional
-    public void etapa3(Etapa3Request req) {
-        RegistroTemporal registro = getRegistroPendiente(req.getEmail());
+    public LoginResponse etapa3(Etapa3Request req) {
+        if (!req.getClave().equals(req.getClaveConfirmacion())) {
+            throw new AppException("La clave y su confirmacion no coinciden", HttpStatus.BAD_REQUEST);
+        }
+
+        RegistroTemporal registro = registroTemporalRepository.findBySetupToken(req.getSetupToken())
+                .orElseThrow(() -> new AppException("Token temporal invalido o expirado", HttpStatus.UNAUTHORIZED));
 
         if (registro.getEtapa() != RegistroTemporal.EtapaRegistro.VERIFICADO) {
             throw new AppException("Debe verificar el email antes de continuar", HttpStatus.BAD_REQUEST);
+        }
+
+        // Validar expiracion del setup_token (si esta habilitada)
+        if (registro.getSetupTokenExpiracion() != null
+                && registro.getSetupTokenExpiracion().isBefore(LocalDateTime.now())) {
+            throw new AppException("El token temporal expiro. Solicita un nuevo link.", HttpStatus.UNAUTHORIZED);
         }
 
         Usuario usuario = Usuario.builder()
                 .nombre(registro.getNombre())
                 .apellido(registro.getApellido())
                 .email(registro.getEmail())
-                .telefono(registro.getTelefono())
-                .domicilio(registro.getDomicilio())
-                .fotoDni(registro.getFotoDni())
                 .clave(passwordEncoder.encode(req.getClave()))
                 .verificado(true)
                 .build();
 
-        usuarioRepository.save(usuario);
+        Usuario savedUsuario = usuarioRepository.save(usuario);
+
+        // Persistir fotos del DNI antes de eliminar el registro temporal
+        if (registro.getFotoFrenteDni() != null && registro.getFotoDorsoDni() != null) {
+            documentoIdentidadRepository.save(DocumentoIdentidad.builder()
+                    .usuarioId(savedUsuario.getId())
+                    .fotoFrente(registro.getFotoFrenteDni())
+                    .fotoDorso(registro.getFotoDorsoDni())
+                    .fechaCarga(LocalDateTime.now())
+                    .build());
+        }
+
         registroTemporalRepository.delete(registro);
+
+        String jwt = jwtUtil.generarToken(usuario.getEmail());
+        // Usuario recien registrado: siempre sin medio de pago y sin multas
+        return new LoginResponse(jwt, usuario.getEmail(), usuario.getNombre(),
+                usuario.getCategoria(), "activo_sin_medio_pago", true, false);
     }
 
-    // ─── Reenviar link de verificación ───────────────────────────────────────
+    // ─── Reenviar link de verificacion ───────────────────────────────────────
 
     public void reenviarLink(ReenviarLinkRequest req) {
         RegistroTemporal registro = getRegistroPendiente(req.getEmail());
 
         String token = UUID.randomUUID().toString();
         registro.setTokenVerificacion(token);
-        registro.setTokenExpiracion(LocalDateTime.now().plusHours(24));
+        registro.setTokenExpiracion(LocalDateTime.now().plusHours(48));
         registroTemporalRepository.save(registro);
 
         // TODO: enviar email
-        log.info("[DEV] Token de verificación para {}: {}", registro.getEmail(), token);
+        log.info("[DEV] Token reenviado para {}: {}", registro.getEmail(), token);
     }
 
     // ─── Login ────────────────────────────────────────────────────────────────
 
     public LoginResponse login(LoginRequest req) {
         Usuario usuario = usuarioRepository.findByEmail(req.getEmail())
-                .orElseThrow(() -> new AppException("Credenciales inválidas", HttpStatus.UNAUTHORIZED));
+                .orElseThrow(() -> new AppException("Email no registrado", HttpStatus.NOT_FOUND));
 
         if (!passwordEncoder.matches(req.getClave(), usuario.getClave())) {
-            throw new AppException("Credenciales inválidas", HttpStatus.UNAUTHORIZED);
+            throw new AppException("Email o clave incorrectos", HttpStatus.UNAUTHORIZED);
         }
 
-        String token = jwtUtil.generarToken(usuario.getEmail());
-        return new LoginResponse(token, usuario.getEmail(), usuario.getNombre(), usuario.getApellido());
+        if (!usuario.isVerificado()) {
+            throw new AppException("Cuenta bloqueada o pendiente de aprobacion", HttpStatus.FORBIDDEN);
+        }
+
+        // TODO: consultar multas y medios de pago reales cuando esten implementados
+        boolean requiereMedioPago = false;
+        boolean tieneMultasActivas = false;
+
+        String jwt = jwtUtil.generarToken(usuario.getEmail());
+        return new LoginResponse(jwt, usuario.getEmail(), usuario.getNombre(),
+                usuario.getCategoria(), usuario.getEstadoCuenta(),
+                requiereMedioPago, tieneMultasActivas);
     }
 
     // ─── Recuperar clave ──────────────────────────────────────────────────────
-    // Decisión de diseño: siempre devuelve OK aunque el email no exista.
-    // Esto evita revelar si una dirección está registrada o no (enumeration attack).
+    // Siempre devuelve OK aunque el email no exista (anti-enumeration)
 
     public void recuperarClave(RecuperarClaveRequest req) {
         usuarioRepository.findByEmail(req.getEmail()).ifPresent(usuario -> {
@@ -147,8 +207,8 @@ public class AuthService {
             temp.setTokenExpiracion(LocalDateTime.now().plusHours(1));
             registroTemporalRepository.save(temp);
 
-            // TODO: enviar email con el link de recuperación
-            log.info("[DEV] Token de recuperación para {}: {}", usuario.getEmail(), token);
+            // TODO: enviar email con el link de recuperacion
+            log.info("[DEV] Token de recuperacion para {}: {}", usuario.getEmail(), token);
         });
     }
 
@@ -157,10 +217,14 @@ public class AuthService {
     @Transactional
     public void cambiarClave(CambiarClaveRequest req) {
         RegistroTemporal temp = registroTemporalRepository.findByTokenVerificacion(req.getToken())
-                .orElseThrow(() -> new AppException("Token inválido", HttpStatus.BAD_REQUEST));
+                .orElseThrow(() -> new AppException("Token invalido", HttpStatus.UNAUTHORIZED));
 
         if (temp.getTokenExpiracion().isBefore(LocalDateTime.now())) {
-            throw new AppException("El token ha expirado", HttpStatus.BAD_REQUEST);
+            throw new AppException("El token ha expirado", HttpStatus.UNAUTHORIZED);
+        }
+
+        if (!req.getNuevaClave().equals(req.getClaveConfirmacion())) {
+            throw new AppException("Las claves no coinciden", HttpStatus.BAD_REQUEST);
         }
 
         Usuario usuario = usuarioRepository.findByEmail(temp.getEmail())
@@ -175,6 +239,7 @@ public class AuthService {
 
     private RegistroTemporal getRegistroPendiente(String email) {
         return registroTemporalRepository.findByEmail(email)
-                .orElseThrow(() -> new AppException("No se encontró un registro pendiente para ese email", HttpStatus.NOT_FOUND));
+                .orElseThrow(() -> new AppException(
+                        "No se encontro un registro pendiente para ese email", HttpStatus.NOT_FOUND));
     }
 }

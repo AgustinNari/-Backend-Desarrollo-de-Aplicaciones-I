@@ -27,14 +27,22 @@ public class RegistroTemporal {
 
     private String nombre;
     private String apellido;
-    private String telefono;
-    private String domicilio;
-    private String fotoDni;
+    private String domicilioLegal;
+    private Integer idPaisOrigen;
 
-    // Token de verificación enviado por email
+    @Lob
+    private byte[] fotoFrenteDni;
+
+    @Lob
+    private byte[] fotoDorsoDni;
+
+    // Token del link enviado por email para verificar la cuenta
     private String tokenVerificacion;
-
     private LocalDateTime tokenExpiracion;
+
+    // Token temporal generado tras verificar el link; se usa en etapa3 para crear la clave
+    private String setupToken;
+    private LocalDateTime setupTokenExpiracion;
 
     @Enumerated(EnumType.STRING)
     @Builder.Default

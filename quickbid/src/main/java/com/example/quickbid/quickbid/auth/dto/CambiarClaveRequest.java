@@ -11,6 +11,9 @@ public class CambiarClaveRequest {
     private String token; // token recibido por email para recuperar clave
 
     @NotBlank
-    @Size(min = 6, message = "La clave debe tener al menos 6 caracteres")
+    @Size(min = 8, message = "La clave debe tener al menos 8 caracteres")
     private String nuevaClave;
+
+    @NotBlank
+    private String claveConfirmacion;
 }
