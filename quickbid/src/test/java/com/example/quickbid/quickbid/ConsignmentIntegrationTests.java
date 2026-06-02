@@ -59,6 +59,17 @@ class ConsignmentIntegrationTests {
 				.andExpect(jsonPath("$.data.puedeContinuar").value(true));
 	}
 
+	@Test void requisitosSinTokenOTokenInvalidoDevuelve401Uniforme() throws Exception {
+		mvc.perform(get("/api/consignaciones/requisitos")).andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("UNAUTHORIZED"));
+		mvc.perform(get("/api/consignaciones/requisitos").header("Authorization", "Bearer token-invalido"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.message").exists())
+				.andExpect(jsonPath("$.errors").isArray());
+	}
+
 	@Test void cuentaBancariaPendientePermiteCrearConsignacionSinMedioVerificadoVigente() throws Exception {
 		jdbc.update("UPDATE app_medios_pago SET estado='pendiente_verificacion',verificado_hasta=NULL WHERE id=5006");
 		request(get("/api/consignaciones/requisitos"), "oro@quickbid.demo").andExpect(status().isOk())
@@ -128,6 +139,20 @@ class ConsignmentIntegrationTests {
 		assertEquals(beforeOwners, count("SELECT COUNT(*) FROM duenios"));
 	}
 
+	@Test void altaSinDeclaracionJuradaDevuelve400Uniforme() throws Exception {
+		var request = multipart("/api/consignaciones")
+				.param("segmento", "comun")
+				.param("aceptaTyC", "true")
+				.param("declaracionPropiedadYOrigenLicito", "false")
+				.param("titulo", "Articulo demo")
+				.param("descripcion", "Descripcion demo");
+		for (int i = 0; i < 6; i++) request.file(photo("fotos", i));
+
+		request(request, "oro@quickbid.demo").andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("CONSIGNMENT_DECLARATION_REQUIRED"));
+	}
+
 	@Test void documentacionSolicitadaQuedaPendienteDeRevisionManual() throws Exception {
 		consignments.requestOriginDocuments(16001L, 1002);
 		request(multipart("/api/consignaciones/16001/documentacion-origen")
@@ -152,6 +177,19 @@ class ConsignmentIntegrationTests {
 				.andExpect(jsonPath("$.errors[0].code").value("FILE_TYPE_NOT_SUPPORTED"));
 	}
 
+	@Test void documentacionInexistenteAjenaOEstadoInvalidoDevuelveErroresUniformes() throws Exception {
+		request(multipart("/api/consignaciones/99999/documentacion-origen").file(pdf("facturaCompra")),
+				"oro@quickbid.demo").andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_FOUND"));
+		request(multipart("/api/consignaciones/16001/documentacion-origen").file(pdf("facturaCompra")),
+				"aprobado@quickbid.demo").andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_OWNED"));
+		request(multipart("/api/consignaciones/16007/documentacion-origen").file(pdf("facturaCompra")),
+				"oro@quickbid.demo").andExpect(status().isConflict())
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_STATE_TRANSITION"));
+	}
+
 	@Test void aceptarAcuerdoCreaProductoYFotosLegacyPublicarCreaItemYPoliza() {
 		Long id = create(3004L);
 		toAgreement(id);
@@ -170,6 +208,33 @@ class ConsignmentIntegrationTests {
 				String.class, id));
 		assertEquals(1, count("SELECT COUNT(*) FROM app_movimientos_puntos WHERE motivo='consignacion_publicada' AND referencia_id=?",
 				id));
+	}
+
+	@Test void aceptarAcuerdoExigeCheckboxesYOwnership() throws Exception {
+		Long id = create(3004L);
+		toAgreement(id);
+
+		request(post("/api/consignaciones/" + id + "/acuerdo/aceptar")
+				.contentType(MediaType.APPLICATION_JSON).content("{}"), "oro@quickbid.demo")
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors").isArray());
+		request(post("/api/consignaciones/" + id + "/acuerdo/aceptar")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"leyoContrato\":true,\"aceptaClausulasPlazos\":true}"), "aprobado@quickbid.demo")
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_OWNED"));
+	}
+
+	@Test void rechazarAcuerdoProcesadoDevuelve409() throws Exception {
+		Long id = create(3004L);
+		toAgreement(id);
+		request(post("/api/consignaciones/" + id + "/acuerdo/rechazar"), "oro@quickbid.demo")
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.estado").value("devolucion_pendiente"));
+		request(post("/api/consignaciones/" + id + "/acuerdo/rechazar"), "oro@quickbid.demo")
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_STATE_TRANSITION"));
 	}
 
 	@Test void polizaCombinadaSoloAdmiteMismoDuenioYMismaSubasta() {
@@ -205,6 +270,27 @@ class ConsignmentIntegrationTests {
 		assertEquals("pendiente_entrega", jdbc.queryForObject("""
 				SELECT estado FROM app_consignacion_devoluciones WHERE solicitud_id=?
 				""", String.class, id));
+	}
+
+	@Test void devolucionYPagoEnvioConRecursosInvalidosDevuelvenErroresUniformes() throws Exception {
+		Long id = rejectedReturn();
+		request(post("/api/consignaciones/16001/devolucion").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"modalidad\":\"retiro\"}"), "oro@quickbid.demo")
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_STATE_TRANSITION"));
+		request(post("/api/consignaciones/" + id + "/devolucion/pagar-envio").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"medioPagoId\":5006,\"idempotencyKey\":\"return-wrong-state\"}"), "oro@quickbid.demo")
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_STATE_TRANSITION"));
+		consignments.selectReturn(3004L, id, shippingReturn());
+		request(post("/api/consignaciones/99999/devolucion/pagar-envio").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"medioPagoId\":5006,\"idempotencyKey\":\"return-missing\"}"), "oro@quickbid.demo")
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_FOUND"));
+		request(post("/api/consignaciones/" + id + "/devolucion/pagar-envio").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"medioPagoId\":5001,\"idempotencyKey\":\"return-foreign\"}"), "aprobado@quickbid.demo")
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_OWNED"));
 	}
 
 	@Test void pagoDeEnvioDeDevolucionExigeMedioVerificadoConValidacionManualVigente() {
@@ -258,6 +344,8 @@ class ConsignmentIntegrationTests {
 	}
 
 	@Test void detalleAjenoEs403YEndpointSinTokenEs401Uniforme() throws Exception {
+		request(get("/api/consignaciones/99999"), "oro@quickbid.demo").andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_FOUND"));
 		request(get("/api/consignaciones/16001"), "aprobado@quickbid.demo").andExpect(status().isForbidden())
 				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_OWNED"));
 		mvc.perform(get("/api/consignaciones")).andExpect(status().isUnauthorized())

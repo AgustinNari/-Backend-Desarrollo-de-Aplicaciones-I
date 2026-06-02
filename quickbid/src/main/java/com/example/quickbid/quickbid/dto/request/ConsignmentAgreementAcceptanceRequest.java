@@ -1,8 +1,9 @@
 package com.example.quickbid.quickbid.dto.request;
 
 import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.NotNull;
 
 public record ConsignmentAgreementAcceptanceRequest(
-		@AssertTrue Boolean leyoContrato,
-		@AssertTrue Boolean aceptaClausulasPlazos) {
+		@NotNull @AssertTrue Boolean leyoContrato,
+		@NotNull @AssertTrue Boolean aceptaClausulasPlazos) {
 }
