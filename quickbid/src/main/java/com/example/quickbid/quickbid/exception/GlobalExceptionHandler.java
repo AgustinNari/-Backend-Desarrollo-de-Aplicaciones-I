@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import com.example.quickbid.quickbid.dto.response.ApiError;
 import com.example.quickbid.quickbid.dto.response.ApiResponse;
@@ -34,7 +35,7 @@ public class GlobalExceptionHandler {
 		List<ApiError> errors = exception.getBindingResult().getFieldErrors().stream()
 				.map(error -> new ApiError(error.getField(), "INVALID_FIELD", error.getDefaultMessage()))
 				.toList();
-		return ResponseEntity.badRequest().body(ApiResponse.failure("La solicitud contiene datos inválidos", errors));
+		return ResponseEntity.badRequest().body(ApiResponse.failure("La solicitud contiene datos invalidos", errors));
 	}
 
 	@ExceptionHandler(MissingServletRequestPartException.class)
@@ -61,6 +62,13 @@ public class GlobalExceptionHandler {
 		return ResponseEntity.badRequest().body(ApiResponse.failure("No se pudo interpretar la solicitud", List.of(error)));
 	}
 
+	@ExceptionHandler(NoResourceFoundException.class)
+	public ResponseEntity<ApiResponse<Void>> handleNoResourceFound(NoResourceFoundException exception) {
+		ApiError error = new ApiError(null, "RESOURCE_NOT_FOUND", "El recurso solicitado no existe");
+		return ResponseEntity.status(HttpStatus.NOT_FOUND)
+				.body(ApiResponse.failure("Recurso inexistente", List.of(error)));
+	}
+
 	@ExceptionHandler(MailDeliveryException.class)
 	public ResponseEntity<ApiResponse<Void>> handleMailDeliveryException(MailDeliveryException exception) {
 		ApiError error = new ApiError(null, "MAIL_DELIVERY_FAILED", "No se pudo enviar el correo");
@@ -71,7 +79,7 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(Exception.class)
 	public ResponseEntity<ApiResponse<Void>> handleUnexpectedException(Exception exception) {
 		LOGGER.error("Unexpected server error", exception);
-		ApiError error = new ApiError(null, "INTERNAL_SERVER_ERROR", "Ocurrió un error interno");
+		ApiError error = new ApiError(null, "INTERNAL_SERVER_ERROR", "Ocurrio un error interno");
 		return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
 				.body(ApiResponse.failure("No se pudo procesar la solicitud", List.of(error)));
 	}
