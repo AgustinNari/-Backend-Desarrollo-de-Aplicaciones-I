@@ -12,18 +12,27 @@ import org.springframework.stereotype.Service;
 public class SimulatedMailService implements MailService {
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(SimulatedMailService.class);
+	private static final String REDACTED_TOKEN = "token-redactado";
+
+	private final MailTemplates templates;
 	private final List<Delivery> deliveries = new CopyOnWriteArrayList<>();
+
+	public SimulatedMailService(MailTemplates templates) {
+		this.templates = templates;
+	}
 
 	@Override
 	public void sendToken(String purpose, String email, String token) {
-		deliveries.add(new Delivery("token", purpose, email));
+		MailTemplates.Message template = templates.token(purpose, REDACTED_TOKEN);
+		deliveries.add(new Delivery("token", purpose, email, template.subject(), template.body()));
 		LOGGER.warn("SIMULATED LOCAL MAIL kind=token purpose={} email={} token delivery omitted because real mail is disabled",
 				purpose, email);
 	}
 
 	@Override
 	public void sendNotification(String email, String type) {
-		deliveries.add(new Delivery("notification", type, email));
+		MailTemplates.Message template = templates.notification(type);
+		deliveries.add(new Delivery("notification", type, email, template.subject(), template.body()));
 		LOGGER.warn("SIMULATED LOCAL MAIL kind=notification purpose={} email={} because real mail is disabled", type, email);
 	}
 
@@ -35,6 +44,6 @@ public class SimulatedMailService implements MailService {
 		deliveries.clear();
 	}
 
-	public record Delivery(String kind, String purpose, String recipient) {
+	public record Delivery(String kind, String purpose, String recipient, String subject, String preview) {
 	}
 }

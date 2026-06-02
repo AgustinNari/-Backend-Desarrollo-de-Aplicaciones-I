@@ -109,6 +109,40 @@ class AuthIntegrationTests {
 	}
 
 	@Test
+	void verificarTokenAceptaSolicitudAprobadaVigente() throws Exception {
+		String raw = "setup-token-vigente";
+		registrationReadyForSetup(9101, "setup-vigente@quickbid.demo", raw,
+				"DATEADD('HOUR',2,CURRENT_TIMESTAMP)", "NULL", 2101);
+
+		mvc.perform(post("/api/auth/registro/verificar-token").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"token\":\"" + raw + "\"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors").isArray());
+	}
+
+	@Test
+	void verificarTokenRechazaTokenVencidoOReutilizado() throws Exception {
+		String expired = "setup-token-vencido";
+		registrationReadyForSetup(9102, "setup-vencido@quickbid.demo", expired,
+				"DATEADD('HOUR',-1,CURRENT_TIMESTAMP)", "NULL", 2102);
+		mvc.perform(post("/api/auth/registro/verificar-token").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"token\":\"" + expired + "\"}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_TOKEN"));
+
+		String used = "setup-token-usado";
+		registrationReadyForSetup(9103, "setup-usado@quickbid.demo", used,
+				"DATEADD('HOUR',2,CURRENT_TIMESTAMP)", "CURRENT_TIMESTAMP", 2103);
+		mvc.perform(post("/api/auth/registro/verificar-token").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"token\":\"" + used + "\"}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_TOKEN"));
+	}
+
+	@Test
 	void loginPermiteUsuarioActivo() throws Exception {
 		login("aprobado@quickbid.demo").andExpect(status().isOk())
 				.andExpect(jsonPath("$.data.accessToken").isString())
@@ -164,10 +198,46 @@ class AuthIntegrationTests {
 	}
 
 	@Test
+	void reenvioLinkNoExponeUsuarioInexistenteNiEnviaMail() throws Exception {
+		mvc.perform(post("/api/auth/registro/reenviar-link").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"email\":\"ausente@quickbid.demo\"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors").isArray());
+
+		assertEquals(0, mail.deliveries().size());
+	}
+
+	@Test
 	void cambiarClaveRechazaTokenInvalido() throws Exception {
 		mvc.perform(put("/api/auth/cambiar-clave").contentType(MediaType.APPLICATION_JSON)
 				.content("{\"token\":\"invalido\",\"clave\":\"Nueva123!\"}"))
 				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_TOKEN"));
+	}
+
+	@Test
+	void cambiarClaveRechazaTokenVencidoOReutilizado() throws Exception {
+		String expired = "reset-token-vencido";
+		jdbc.update("""
+				INSERT INTO app_password_reset_tokens(cuenta_id,token_hash,expires_at)
+				VALUES (3001,?,DATEADD('MINUTE',-1,CURRENT_TIMESTAMP))
+				""", tokens.hash(expired));
+		mvc.perform(put("/api/auth/cambiar-clave").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"token\":\"" + expired + "\",\"clave\":\"Nueva123!\"}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_TOKEN"));
+
+		String used = "reset-token-usado";
+		jdbc.update("""
+				INSERT INTO app_password_reset_tokens(cuenta_id,token_hash,expires_at,used_at)
+				VALUES (3001,?,DATEADD('MINUTE',30,CURRENT_TIMESTAMP),CURRENT_TIMESTAMP)
+				""", tokens.hash(used));
+		mvc.perform(put("/api/auth/cambiar-clave").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"token\":\"" + used + "\",\"clave\":\"Nueva123!\"}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.data").value(nullValue()))
 				.andExpect(jsonPath("$.errors[0].code").value("INVALID_TOKEN"));
 	}
 
@@ -304,6 +374,21 @@ class AuthIntegrationTests {
 
 	private String refreshBody(String token) {
 		return "{\"refreshToken\":\"" + token + "\"}";
+	}
+
+	private void registrationReadyForSetup(long id, String email, String rawToken, String expiresSql, String usedSql,
+			int personId) {
+		jdbc.update("INSERT INTO personas (identificador,documento,nombre,direccion,estado) VALUES (?,?,?,?,?)",
+				personId, "DNI-" + personId, "Persona Setup " + personId, "Av. Setup " + personId, "activo");
+		jdbc.update("INSERT INTO clientes (identificador,\"numeroPais\",admitido,categoria,verificador) VALUES (?,?,?,?,?)",
+				personId, 32, "si", "comun", 1001);
+		jdbc.update("""
+				INSERT INTO app_solicitudes_registro(
+					id,email,nombre,apellido,domicilio_legal,id_pais_origen,estado,
+					setup_token_hash,setup_token_expires_at,setup_token_used_at,persona_id,cliente_id
+				)
+				VALUES (?,?,?,?,?,32,'aprobada_pendiente_finalizacion',?,""" + expiresSql + "," + usedSql + ",?,?)",
+				id, email, "Setup", "Demo", "Av. Setup", tokens.hash(rawToken), personId, personId);
 	}
 
 	private boolean delivered(String kind, String purpose) {

@@ -42,12 +42,24 @@ class MailServiceTests {
 
     @Test
     void simulatedMailDoesNotRetainRawToken() {
-        SimulatedMailService mail = new SimulatedMailService();
+        SimulatedMailService mail = new SimulatedMailService(new MailTemplates("https://frontend.quickbid.demo"));
 
         mail.sendToken("recuperacion", "usuario@quickbid.demo", "token-super-secreto");
 
         assertEquals(1, mail.deliveries().size());
+        assertEquals("Recupera tu clave de QuickBid", mail.deliveries().get(0).subject());
+        assertTrue(mail.deliveries().get(0).preview().contains("token-redactado"));
         assertFalse(mail.deliveries().toString().contains("token-super-secreto"));
+    }
+
+    @Test
+    void simulatedMailValidatesKnownTemplateTypes() {
+        SimulatedMailService mail = new SimulatedMailService(new MailTemplates("https://frontend.quickbid.demo"));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> mail.sendToken("desconocido", "usuario@quickbid.demo", "token"));
+        assertThrows(IllegalArgumentException.class,
+                () -> mail.sendNotification("usuario@quickbid.demo", "desconocida"));
     }
 
     @Test
@@ -84,6 +96,28 @@ class MailServiceTests {
                 MailDeliveryException.class,
                 () -> mail.sendNotification("usuario@quickbid.demo", "multa_generada")
         );
+    }
+
+    @Test
+    void smtpRequiresConfiguredSenderAddress() {
+        assertThrows(MailDeliveryException.class,
+                () -> new SmtpMailService(new StubJavaMailSender(),
+                        new MailTemplates("https://frontend.quickbid.demo"), ""));
+        assertThrows(MailDeliveryException.class,
+                () -> new SmtpMailService(new StubJavaMailSender(),
+                        new MailTemplates("https://frontend.quickbid.demo"), "no-es-email"));
+    }
+
+    @Test
+    void smtpRejectsInvalidRecipientAsControlledMailError() {
+        SmtpMailService mail = new SmtpMailService(
+                new StubJavaMailSender(),
+                new MailTemplates("https://frontend.quickbid.demo"),
+                "no-reply@quickbid.demo"
+        );
+
+        assertThrows(MailDeliveryException.class,
+                () -> mail.sendNotification("destinatario-invalido", "multa_generada"));
     }
 
     private static class StubJavaMailSender implements JavaMailSender {

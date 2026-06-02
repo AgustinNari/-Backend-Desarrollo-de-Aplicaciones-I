@@ -22,7 +22,7 @@ public class SmtpMailService implements MailService {
 			@Value("${app.mail.from}") String from) {
 		this.sender = sender;
 		this.templates = templates;
-		this.from = required(from, "APP_MAIL_FROM");
+		this.from = requiredEmail(from, "APP_MAIL_FROM");
 	}
 
 	@Override
@@ -36,8 +36,7 @@ public class SmtpMailService implements MailService {
 	}
 
 	private void send(String recipient, MailTemplates.Message template, String type) {
-		String to = required(recipient, "destinatario");
-		if (!to.contains("@")) throw new MailDeliveryException("Destinatario de correo invalido");
+		String to = requiredEmail(recipient, "destinatario");
 		try {
 			SimpleMailMessage message = new SimpleMailMessage();
 			message.setFrom(from);
@@ -54,5 +53,11 @@ public class SmtpMailService implements MailService {
 	private String required(String value, String field) {
 		if (value == null || value.isBlank()) throw new MailDeliveryException("Falta configurar " + field);
 		return value.trim();
+	}
+
+	private String requiredEmail(String value, String field) {
+		String email = required(value, field);
+		if (!email.contains("@")) throw new MailDeliveryException("Correo invalido: " + field);
+		return email;
 	}
 }
