@@ -35,7 +35,7 @@ public class PurchaseReadRepository {
 		return jdbc.query("""
 				SELECT d.id,d.tipo,d.estado,d.archivo_id,a.filename_original,a.content_type,a.size_bytes,d.created_at
 				FROM app_documentos d JOIN app_archivos a ON a.id=d.archivo_id
-				WHERE d.referencia_tipo='compra' AND d.referencia_id=? AND d.estado<>'anulado'
+				WHERE d.referencia_tipo='compra' AND d.referencia_id=? AND d.estado='disponible'
 				ORDER BY d.created_at,d.id
 				""", (rs, row) -> new Document(rs.getLong("id"), rs.getString("tipo"), rs.getString("estado"),
 						rs.getLong("archivo_id"), rs.getString("filename_original"), rs.getString("content_type"),

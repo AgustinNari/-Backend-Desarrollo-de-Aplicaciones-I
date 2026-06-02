@@ -134,6 +134,13 @@ class PurchaseIntegrationTests {
 				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_OWNED"));
 	}
 
+	@Test void compraInexistenteDevuelve404Uniforme() throws Exception {
+		auth(get("/api/compras/99999"), "aprobado@quickbid.demo")
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_FOUND"));
+	}
+
 	@Test void entregaPorEnvioYPagoExtrasDejanEntregaPendiente() throws Exception {
 		auth(put("/api/compras/13002/entrega").contentType(MediaType.APPLICATION_JSON)
 				.content("{\"tipo\":\"envio\",\"direccionEnvioId\":5101}"), "aprobado@quickbid.demo")
@@ -145,7 +152,18 @@ class PurchaseIntegrationTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.data.estado").value("aprobado"))
 				.andExpect(jsonPath("$.data.monto").value(13000))
-				.andExpect(jsonPath("$.data.compraEstado").value("entrega_pendiente"));
+				.andExpect(jsonPath("$.data.compraEstado").value("entrega_pendiente"))
+				.andExpect(jsonPath("$.data.numeroTarjeta").doesNotExist())
+				.andExpect(jsonPath("$.data.cvv").doesNotExist())
+				.andExpect(jsonPath("$.data.hashIdentificador").doesNotExist());
+	}
+
+	@Test void entregaEnEstadoInvalidoDevuelve409Uniforme() throws Exception {
+		auth(put("/api/compras/13001/entrega").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"tipo\":\"retiro\"}"), "multa@quickbid.demo")
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_STATE_TRANSITION"));
 	}
 
 	@Test void retiroPierdeCoberturaYPuedeCompletarseInternamente() throws Exception {
@@ -186,17 +204,52 @@ class PurchaseIntegrationTests {
 				.andExpect(jsonPath("$.errors[0].code").value("IDEMPOTENCY_CONFLICT"));
 	}
 
-	@Test void documentosDevuelveSoloComprobantesDeCompraPropia() throws Exception {
+	@Test void pagoConMedioInexistenteOAjenoDevuelveErroresUniformes() throws Exception {
+		auth(put("/api/compras/13002/entrega").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"tipo\":\"retiro\"}"), "aprobado@quickbid.demo").andExpect(status().isOk());
+		auth(post("/api/compras/13002/pagar").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"medioPagoId\":9999,\"idempotencyKey\":\"missing-payment\"}"), "aprobado@quickbid.demo")
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_FOUND"));
+		auth(post("/api/compras/13002/pagar").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"medioPagoId\":5006,\"idempotencyKey\":\"foreign-payment\"}"), "aprobado@quickbid.demo")
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_OWNED"));
+	}
+
+	@Test void pagoDuplicadoConNuevaClaveSeRechazaPorEstado() throws Exception {
+		auth(put("/api/compras/13002/entrega").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"tipo\":\"retiro\"}"), "aprobado@quickbid.demo").andExpect(status().isOk());
+		auth(post("/api/compras/13002/pagar").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"medioPagoId\":5001,\"idempotencyKey\":\"extras-first\"}"), "aprobado@quickbid.demo")
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.estado").value("aprobado"));
+		auth(post("/api/compras/13002/pagar").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"medioPagoId\":5001,\"idempotencyKey\":\"extras-second\"}"), "aprobado@quickbid.demo")
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_STATE_TRANSITION"));
+	}
+
+	@Test void documentosDevuelveSoloComprobantesDisponiblesDeCompraPropia() throws Exception {
 		jdbc.update("""
 				INSERT INTO app_archivos(id,tipo_contexto,filename_original,content_type,size_bytes,storage_path,checksum)
 				VALUES (5201,'documento_compra','factura-demo.pdf','application/pdf',1234,'demo/factura.pdf','checksum')
 				""");
+		jdbc.update("""
+				INSERT INTO app_archivos(id,tipo_contexto,filename_original,content_type,size_bytes,storage_path,checksum)
+				VALUES (5202,'documento_compra','pendiente-demo.pdf','application/pdf',1234,'demo/pendiente.pdf','checksum-pending')
+				""");
 		jdbc.update("INSERT INTO app_documentos(id,tipo,referencia_tipo,referencia_id,archivo_id,estado) VALUES (5301,'factura_compra','compra',13002,5201,'disponible')");
+		jdbc.update("INSERT INTO app_documentos(id,tipo,referencia_tipo,referencia_id,archivo_id,estado) VALUES (5302,'comprobante_interno','compra',13002,5202,'pendiente')");
 
 		auth(get("/api/compras/13002/documentos"), "aprobado@quickbid.demo").andExpect(status().isOk())
 				.andExpect(jsonPath("$.data", hasSize(1)))
 				.andExpect(jsonPath("$.data[0].filename").value("factura-demo.pdf"));
 		auth(get("/api/compras/13002/documentos"), "multa@quickbid.demo").andExpect(status().isForbidden());
+		auth(get("/api/compras/99999/documentos"), "aprobado@quickbid.demo").andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_FOUND"));
 	}
 
 	@Test void pagarConMultaPublicoFuncionaParaUsuarioRestringido() throws Exception {
@@ -232,6 +285,14 @@ class PurchaseIntegrationTests {
 		mvc.perform(get("/api/compras")).andExpect(status().isUnauthorized())
 				.andExpect(jsonPath("$.data").value(nullValue()))
 				.andExpect(jsonPath("$.errors[0].code").value("UNAUTHORIZED"));
+	}
+
+	@Test void comprasConTokenInvalidoDevuelve401Uniforme() throws Exception {
+		mvc.perform(get("/api/compras").header("Authorization", "Bearer token-invalido"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.message").exists())
+				.andExpect(jsonPath("$.errors").isArray());
 	}
 
 	@Test void dosCierresConcurrentesNoDuplicanCompra() throws Exception {
