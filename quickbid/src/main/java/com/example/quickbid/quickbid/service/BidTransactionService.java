@@ -52,16 +52,17 @@ public class BidTransactionService {
 		Auction auction = auction(auctionId);
 		if (!auction.state().equals("en_vivo")) throw conflict("La subasta no esta en vivo", "AUCTION_NOT_LIVE");
 		if (!live.version().equals(request.clientStateVersion())) throw conflict("El estado de la subasta cambio", "BID_OUTDATED_STATE");
+		Item item = item(accountId, auctionId, request.itemCatalogoId());
 		if (live.itemId() == null || !live.itemId().equals(request.itemCatalogoId())) throw conflict("El lote ya no esta activo", "ITEM_NOT_ACTIVE");
+		if (categoryOrder(account.category()) == 0 || categoryOrder(auction.category()) == 0) throw unprocessable("Categoria invalida", "INVALID_CATEGORY");
 		if (categoryOrder(account.category()) < categoryOrder(auction.category())) throw forbidden("Categoria insuficiente", "AUCTION_CATEGORY_FORBIDDEN");
 
 		Payment payment = payment(accountId, request.medioPagoId());
 		validatePayment(payment, auction.currency(), request.monto());
 		if (participatesInOtherAuction(accountId, auctionId)) throw conflict("El usuario participa en otra subasta", "OTHER_AUCTION_PARTICIPATION");
 
-		BigDecimal basePrice = basePrice(request.itemCatalogoId());
 		PriorBid prior = bestBid(auctionId, request.itemCatalogoId());
-		validateAmount(auction.category(), request.monto(), basePrice, prior == null ? null : prior.amount());
+		validateAmount(auction.category(), request.monto(), item.basePrice(), prior == null ? null : prior.amount());
 
 		int assistantId = assistant(account.clientId(), auctionId);
 		int bidderNumber = bidderNumber(assistantId);
@@ -176,11 +177,23 @@ public class BidTransactionService {
 		return auctionQueries.existsParticipationInOtherLiveAuction(accountId, auctionId);
 	}
 
-	private BigDecimal basePrice(Integer itemId) {
-		List<BigDecimal> values = jdbc.query("SELECT \"precioBase\" FROM \"itemsCatalogo\" WHERE identificador=?",
-				(rs, row) -> rs.getBigDecimal(1), itemId);
+	private Item item(Long accountId, Integer auctionId, Integer itemId) {
+		List<Item> values = jdbc.query("""
+				SELECT i."precioBase",c.subasta,
+				       (SELECT s.cuenta_id FROM app_solicitudes_consignacion s
+				        WHERE s.item_catalogo_id=i.identificador
+				        ORDER BY s.id LIMIT 1) cuenta_consignadora_id
+				FROM "itemsCatalogo" i JOIN catalogos c ON c.identificador=i.catalogo
+				WHERE i.identificador=?
+				""", (rs, row) -> new Item(rs.getBigDecimal("precioBase"), rs.getInt("subasta"),
+						(Long) rs.getObject("cuenta_consignadora_id")), itemId);
 		if (values.isEmpty()) throw notFound("Item inexistente");
-		return values.get(0);
+		Item item = values.get(0);
+		if (!item.auctionId().equals(auctionId)) throw notFound("Item inexistente");
+		if (item.ownerAccountId() != null && item.ownerAccountId().equals(accountId)) {
+			throw forbidden("No puede pujar por un bien propio", "OWN_ITEM_BID_FORBIDDEN");
+		}
+		return item;
 	}
 
 	private PriorBid bestBid(Integer auctionId, Integer itemId) {
@@ -314,6 +327,9 @@ public class BidTransactionService {
 
 	private record Payment(Long accountId, String type, String currency, String state, BigDecimal limit,
 			BigDecimal consumed, BigDecimal guarantee, OffsetDateTime verifiedUntil, OffsetDateTime deletedAt) {
+	}
+
+	private record Item(BigDecimal basePrice, Integer auctionId, Long ownerAccountId) {
 	}
 
 	private record PriorBid(Long id, Long accountId, BigDecimal amount) {

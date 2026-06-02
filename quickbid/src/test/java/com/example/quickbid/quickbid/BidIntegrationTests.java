@@ -56,6 +56,46 @@ class BidIntegrationTests {
 				.andExpect(jsonPath("$.errors[0].code").value("UNAUTHORIZED"));
 	}
 
+	@Test void tokenInvalidoDevuelve401Uniforme() throws Exception {
+		mvc.perform(post("/api/subastas/6001/pujar")
+				.header("Authorization", "Bearer token-invalido")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(bid(9001, "25300", 5001, 1, "invalid-token")))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.message").exists())
+				.andExpect(jsonPath("$.errors").isArray());
+	}
+
+	@Test void requestInvalidoDevuelve400Uniforme() throws Exception {
+		authBid("aprobado@quickbid.demo", 6001, """
+				{"itemCatalogoId":9001,"monto":0,"medioPagoId":5001,"clientStateVersion":1}
+				""")
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors").isArray())
+				.andExpect(jsonPath("$.errors[0].field").exists());
+	}
+
+	@Test void subastaInexistenteDevuelve404Uniforme() throws Exception {
+		authBid("aprobado@quickbid.demo", 9999, bid(9001, "25300", 5001, 1, "missing-auction"))
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_FOUND"));
+	}
+
+	@Test void itemInexistenteDevuelve404AntesDeValidarLoteActivo() throws Exception {
+		authBid("aprobado@quickbid.demo", 6001, bid(9999, "25300", 5001, 1, "missing-item"))
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_FOUND"));
+	}
+
+	@Test void itemDeOtraSubastaDevuelve404() throws Exception {
+		authBid("aprobado@quickbid.demo", 6001, bid(9003, "25300", 5001, 1, "foreign-item"))
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_FOUND"));
+	}
+
 	@Test void pujaValidaActualizaSnapshotAppLegacyAuditoriaYNotificacion() throws Exception {
 		authBid("aprobado@quickbid.demo", 6001, bid(9001, "25300", 5001, 1, "valid-normal"))
 				.andExpect(status().isCreated())
@@ -98,6 +138,15 @@ class BidIntegrationTests {
 				.andExpect(jsonPath("$.errors[0].code").value("PAYMENT_METHOD_CURRENCY_MISMATCH"));
 	}
 
+	@Test void medioInexistenteYMedioAjenoSeRechazan() throws Exception {
+		authBid("aprobado@quickbid.demo", 6001, bid(9001, "25300", 9999, 1, "missing-payment"))
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_FOUND"));
+		authBid("aprobado@quickbid.demo", 6001, bid(9001, "25300", 5006, 1, "other-payment"))
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_OWNED"));
+	}
+
 	@Test void medioVencidoSeRechaza() throws Exception {
 		jdbc.update("UPDATE app_medios_pago SET verificado_hasta=DATEADD('DAY',-1,CURRENT_TIMESTAMP) WHERE id=5001");
 		authBid("aprobado@quickbid.demo", 6001, bid(9001, "25300", 5001, 1, "expired-payment"))
@@ -115,6 +164,12 @@ class BidIntegrationTests {
 
 	@Test void subastaNoLiveSeRechaza() throws Exception {
 		authBid("aprobado@quickbid.demo", 6002, bid(9003, "1500", 5002, 0, "not-live"))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.errors[0].code").value("AUCTION_NOT_LIVE"));
+	}
+
+	@Test void subastaCerradaSeRechaza() throws Exception {
+		authBid("aprobado@quickbid.demo", 6003, bid(9004, "120000", 5001, 3, "closed-auction"))
 				.andExpect(status().isConflict())
 				.andExpect(jsonPath("$.errors[0].code").value("AUCTION_NOT_LIVE"));
 	}
@@ -138,6 +193,46 @@ class BidIntegrationTests {
 		authBid("aprobado@quickbid.demo", 6001, bid(9001, "25300", 5001, 1, "insufficient"))
 				.andExpect(status().isUnprocessableEntity())
 				.andExpect(jsonPath("$.errors[0].code").value("PAYMENT_METHOD_INSUFFICIENT_FUNDS"));
+	}
+
+	@Test void pujaIgualALaActualSeRechazaComoMontoInsuficiente() throws Exception {
+		authBid("aprobado@quickbid.demo", 6001, bid(9001, "25100", 5001, 1, "same-current"))
+				.andExpect(status().isUnprocessableEntity())
+				.andExpect(jsonPath("$.errors[0].code").value("BID_AMOUNT_BELOW_MINIMUM"));
+	}
+
+	@Test void pujaActualSeCalculaPorItemYNoPorTodaLaSubasta() throws Exception {
+		liveAuction(6108, 9108, "especial", 1000);
+		addItem(6108, 9109, 1000);
+		jdbc.update("""
+				INSERT INTO app_pujas_live(id,subasta_id,item_catalogo_id,cuenta_id,medio_pago_id,monto,moneda,estado,secuencia,version_estado,idempotency_key)
+				VALUES (12650,6108,9109,3004,5006,5000,'ARS','aceptada',1,0,'other-item-high')
+				""");
+
+		authBid("oro@quickbid.demo", 6108, bid(9108, "1000", 5006, 0, "same-auction-other-item"))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.data.itemCatalogoId").value(9108))
+				.andExpect(jsonPath("$.data.mejorOfertaActual").value(1000));
+	}
+
+	@Test void usuarioNoPuedePujarSobreBienPropioConsignado() throws Exception {
+		liveAuction(6109, 9109, "oro", 1000);
+		jdbc.update("""
+				INSERT INTO app_solicitudes_consignacion(id,cuenta_id,cliente_id,producto_id,item_catalogo_id,subasta_id,titulo,descripcion,
+					categoria_sugerida,declaracion_propiedad,acepta_devolucion_con_cargo,estado)
+				VALUES (16109,3004,2004,10109,9109,6109,'Bien propio','Demo','oro',true,true,'publicada')
+				""");
+
+		authBid("oro@quickbid.demo", 6109, bid(9109, "1000", 5006, 0, "own-item"))
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.errors[0].code").value("OWN_ITEM_BID_FORBIDDEN"));
+	}
+
+	@Test void categoriaInconsistenteDevuelve422() throws Exception {
+		liveAuction(6110, 9110, "diamante", 1000);
+		authBid("oro@quickbid.demo", 6110, bid(9110, "1000", 5006, 0, "invalid-category"))
+				.andExpect(status().isUnprocessableEntity())
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_CATEGORY"));
 	}
 
 	@Test void idempotenciaRepiteRespuestaSinDuplicarYDetectaConflicto() throws Exception {
@@ -298,6 +393,15 @@ class BidIntegrationTests {
 				itemId, catalogId, productId, basePrice, 100, "no");
 		jdbc.update("INSERT INTO app_subasta_estado_vivo(subasta_id,item_catalogo_activo_id,version,usuarios_conectados) VALUES (?,?,0,0)",
 				auctionId, itemId);
+	}
+
+	private void addItem(int auctionId, int itemId, int basePrice) {
+		int productId = itemId + 1000;
+		int catalogId = itemId + 2000;
+		jdbc.update("INSERT INTO productos(identificador,\"descripcionCatalogo\") VALUES (?,?)", productId, "Item demo " + itemId);
+		jdbc.update("INSERT INTO catalogos(identificador,descripcion,subasta) VALUES (?,?,?)", catalogId, "Catalogo extra", auctionId);
+		jdbc.update("INSERT INTO \"itemsCatalogo\"(identificador,catalogo,producto,\"precioBase\",comision,subastado) VALUES (?,?,?,?,?,?)",
+				itemId, catalogId, productId, basePrice, 100, "no");
 	}
 
 	private void enroll(int auctionId, long accountId, long paymentId) {
