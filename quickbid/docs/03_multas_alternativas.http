@@ -1,0 +1,114 @@
+# -----------------------------------------------------------------------------
+# QuickBid - variables comunes para REST Client
+# -----------------------------------------------------------------------------
+# Levantar backend antes de usar:
+#   $env:SPRING_PROFILES_ACTIVE="dev"
+#   $env:DB_URL="jdbc:postgresql://localhost:5432/baseQuickbid"
+#   $env:DB_USERNAME="postgres"
+#   $env:DB_PASSWORD="TU_PASSWORD_POSTGRES"
+#   $env:APP_JWT_SECRET="quickbid-secret-local-de-prueba-super-largo-123456"
+#   $env:APP_ADMIN_ENABLED="true"
+#   $env:APP_ADMIN_INTERNAL_KEY="test-admin-key"
+#   $env:APP_MAIL_ENABLED="false"
+#   .\mvnw.cmd spring-boot:run
+# -----------------------------------------------------------------------------
+
+@baseUrl = http://localhost:8080
+@adminKey = test-admin-key
+
+@cuentaAprobadaId = 3001
+@cuentaMultaId = 3002
+@cuentaConsignadorId = 3004
+@medioPagoAprobadoArsId = 5001
+@medioPagoPendienteChequeId = 5003
+@medioPagoMultaArsId = 5004
+@medioPagoConsignadorArsId = 5005
+@subastaEnVivoId = 6001
+@subastaEspecialUsdId = 6002
+@subastaCerradaId = 6003
+@subastaPublicableId = 6004
+@catalogoPublicableId = 7004
+@itemActivoId = 9001
+@itemPublicadoId = 9002
+@compraMultaId = 13001
+@compraPagosExtraId = 13002
+@multaId = 14001
+@consignacionPendienteId = 16001
+@consignacionDocumentacionId = 16002
+@consignacionFisicaId = 16003
+@consignacionAcuerdoId = 16004
+@consignacionPublicableId = 16008
+@consignacionDevolucionId = 16006
+
+@accessAprobado = {{loginAprobado.response.body.$.data.accessToken}}
+@refreshAprobado = {{loginAprobado.response.body.$.data.refreshToken}}
+@accessConsignador = {{loginConsignador.response.body.$.data.accessToken}}
+@refreshConsignador = {{loginConsignador.response.body.$.data.refreshToken}}
+@accessMulta = {{loginMulta.response.body.$.data.accessToken}}
+@refreshMulta = {{loginMulta.response.body.$.data.refreshToken}}
+
+### 00 - Health
+GET {{baseUrl}}/actuator/health
+
+### 01 - Auth - Login usuario aprobado
+# @name loginAprobado
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "aprobado@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+### 02 - Auth - Login usuario consignador
+# @name loginConsignador
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "consignador@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+### 03 - Auth - Login usuario con restriccion por multa
+# @name loginMulta
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "multa@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+### 04 - Auth - Login usuario bloqueado debe devolver 403
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "bloqueado@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+# -----------------------------------------------------------------------------
+# ESCENARIO 03: multas. Elegir SOLO UNA rama por base limpia.
+# Rama A: pagar con multa. Rama B: vencer multa. Si ejecutas una, la otra puede
+# devolver 409 porque cambia el estado de la misma multa seed.
+# -----------------------------------------------------------------------------
+
+### 05A - RAMA A - Pagar adjudicacion con multa usando usuario multa
+POST {{baseUrl}}/api/compras/{{compraMultaId}}/pagar-con-multa
+Authorization: Bearer {{accessMulta}}
+Content-Type: application/json
+
+{
+  "medioPagoId": {{medioPagoMultaArsId}},
+  "idempotencyKey": "manual-multa-pago-{{$timestamp}}"
+}
+
+### 05B - RAMA B - Vencer multa seed
+POST {{baseUrl}}/api/admin/multas/{{multaId}}/vencer
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### 06 - Ver perfil usuario multa luego de la rama elegida
+GET {{baseUrl}}/api/usuario/perfil
+Authorization: Bearer {{accessMulta}}

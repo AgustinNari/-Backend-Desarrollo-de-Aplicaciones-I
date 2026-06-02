@@ -1,1 +1,47 @@
-quickbid/src/main/resources/application.properties
+# =========================================================
+# QuickBid / Java / Maven
+# =========================================================
+
+# Build output
+target/
+quickbid/target/
+
+# Runtime uploads / local generated files
+uploads/
+quickbid/uploads/
+
+# Test/runtime generated uploads
+quickbid/target/test-uploads/
+
+# Logs and crash dumps
+*.log
+hs_err_pid*
+replay_pid*
+
+# Local environment variables / secrets
+.env
+.env.*
+*.env
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+.classpath
+.project
+.settings/
+.springBeans
+.sts4-cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+
+# Importante:
+# No ignorar quickbid/src/main/resources/application.properties.
+# Ese archivo debe versionarse porque usa variables de entorno,
+# no credenciales reales.

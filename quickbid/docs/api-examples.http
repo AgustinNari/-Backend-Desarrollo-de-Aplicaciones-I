@@ -1,0 +1,566 @@
+# Para recibir links reales de setup y recuperacion, iniciar el backend con:
+# APP_MAIL_ENABLED=true, APP_MAIL_FROM, APP_FRONTEND_BASE_URL y SPRING_MAIL_*.
+# En dev/test el mail simulado registra metadata sin imprimir tokens.
+
+@baseUrl = http://localhost:8080
+@accessToken = reemplazar-access-token
+@refreshToken = reemplazar-refresh-token
+@adminKey = reemplazar-clave-admin
+@setupToken = reemplazar-setup-token
+@passwordResetToken = reemplazar-token-recuperacion
+@registroId = 1
+@medioPagoId = 5001
+@medioPagoPendienteId = 5003
+@subastaId = 6001
+@itemCatalogoId = 9001
+@compraId = 13002
+@compraMultaId = 13001
+@multaId = 14001
+@consignacionId = 16001
+@consignacionAcuerdoId = 16004
+@consignacionPublicableId = 16008
+
+### Auth - registro etapa 1
+POST {{baseUrl}}/api/auth/registro/etapa1
+Content-Type: application/json
+
+{
+  "email": "nuevo.usuario@quickbid.demo",
+  "nombre": "Nuevo",
+  "apellido": "Usuario",
+  "domicilioLegal": "Calle Demo 123",
+  "idPaisOrigen": 32
+}
+
+### Auth - registro etapa 2
+# Reemplazar las rutas por imagenes JPEG, PNG o WebP reales.
+POST {{baseUrl}}/api/auth/registro/etapa2
+Content-Type: multipart/form-data; boundary=QuickBidBoundary
+
+--QuickBidBoundary
+Content-Disposition: form-data; name="email"
+
+nuevo.usuario@quickbid.demo
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotoFrente"; filename="dni-frente.png"
+Content-Type: image/png
+
+< ./fixturesv1/dni-frente.png
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotoDorso"; filename="dni-dorso.png"
+Content-Type: image/png
+
+< ./fixturesv1/dni-dorso.png
+--QuickBidBoundary--
+
+### Admin - listar solicitudes de registro
+GET {{baseUrl}}/api/admin/solicitudes-registro
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### Admin - aprobar registro, persistir hash y enviar link de setup
+POST {{baseUrl}}/api/admin/solicitudes-registro/{{registroId}}/aprobar
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "documento": "DNI-DEMO-001",
+  "categoriaInicial": "comun"
+}
+
+### Admin - rechazar registro con motivo
+POST {{baseUrl}}/api/admin/solicitudes-registro/{{registroId}}/rechazar
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "motivo": "Documentacion ilegible"
+}
+
+### Auth - verificar setup token
+POST {{baseUrl}}/api/auth/registro/verificar-token
+Content-Type: application/json
+
+{
+  "token": "{{setupToken}}"
+}
+
+### Auth - finalizar registro
+POST {{baseUrl}}/api/auth/registro/etapa3
+Content-Type: application/json
+
+{
+  "token": "{{setupToken}}",
+  "clave": "Nueva123!"
+}
+
+### Auth - reenviar link generico
+POST {{baseUrl}}/api/auth/registro/reenviar-link
+Content-Type: application/json
+
+{
+  "email": "nuevo.usuario@quickbid.demo"
+}
+
+### Auth - login demo
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "aprobado@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+### Auth - refresh con rotacion
+POST {{baseUrl}}/api/auth/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "{{refreshToken}}"
+}
+
+### Auth - logout
+POST {{baseUrl}}/api/auth/logout
+Content-Type: application/json
+
+{
+  "refreshToken": "{{refreshToken}}"
+}
+
+### Auth - solicitar recuperacion de clave y enviar link sin enumerar emails
+POST {{baseUrl}}/api/auth/recuperar-clave
+Content-Type: application/json
+
+{
+  "email": "aprobado@quickbid.demo"
+}
+
+### Auth - cambiar clave con token temporal
+PUT {{baseUrl}}/api/auth/cambiar-clave
+Content-Type: application/json
+
+{
+  "token": "{{passwordResetToken}}",
+  "clave": "Nueva123!"
+}
+
+### Usuario - perfil
+GET {{baseUrl}}/api/usuario/perfil
+Authorization: Bearer {{accessToken}}
+
+### Usuario - estadisticas
+GET {{baseUrl}}/api/usuario/estadisticas
+Authorization: Bearer {{accessToken}}
+
+### Usuario - historial
+GET {{baseUrl}}/api/usuario/historial?page=0&size=20
+Authorization: Bearer {{accessToken}}
+
+### Usuario - notificaciones
+GET {{baseUrl}}/api/usuario/notificaciones?leida=false&page=0&size=20
+Authorization: Bearer {{accessToken}}
+
+### Usuario - direccion de envio
+PUT {{baseUrl}}/api/usuario/direccion-envio
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "alias": "Casa",
+  "destinatario": "Ana Aprobada",
+  "calle": "Av. Demo",
+  "numero": "100",
+  "codigoPostal": "C1000",
+  "localidad": "Buenos Aires",
+  "provincia": "Buenos Aires",
+  "pais": "Argentina"
+}
+
+### Medios de pago - listar propios
+GET {{baseUrl}}/api/usuario/medios-pago
+Authorization: Bearer {{accessToken}}
+
+### Medios de pago - registrar tarjeta ficticia
+POST {{baseUrl}}/api/usuario/medios-pago
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "tipo": "tarjeta",
+  "moneda": "ARS",
+  "nacional": true,
+  "titular": "Ana Aprobada",
+  "numeroTarjeta": "4111111111111111",
+  "cvv": "123",
+  "vencimientoMes": 12,
+  "vencimientoAnio": 2030,
+  "marca": "Visa"
+}
+
+### Medios de pago - registrar cheque con imagenes reales
+POST {{baseUrl}}/api/usuario/medios-pago
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=QuickBidBoundary
+
+--QuickBidBoundary
+Content-Disposition: form-data; name="moneda"
+
+ARS
+--QuickBidBoundary
+Content-Disposition: form-data; name="nacional"
+
+true
+--QuickBidBoundary
+Content-Disposition: form-data; name="titular"
+
+Ana Aprobada
+--QuickBidBoundary
+Content-Disposition: form-data; name="numeroCheque"
+
+CHK-DEMO-HTTP-001
+--QuickBidBoundary
+Content-Disposition: form-data; name="monto"
+
+150000
+--QuickBidBoundary
+Content-Disposition: form-data; name="fechaVencimiento"
+
+2030-12-31
+--QuickBidBoundary
+Content-Disposition: form-data; name="bancoEmisor"
+
+Banco Demo
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotoAnverso"; filename="cheque-frente.png"
+Content-Type: image/png
+
+< ./fixturesv1/cheque-frente.png
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotoReverso"; filename="cheque-dorso.png"
+Content-Type: image/png
+
+< ./fixturesv1/cheque-dorso.png
+--QuickBidBoundary--
+
+### Admin - listar medios pendientes
+GET {{baseUrl}}/api/admin/medios-pago?estado=pendiente_verificacion
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### Admin - verificar medio
+POST {{baseUrl}}/api/admin/medios-pago/{{medioPagoPendienteId}}/verificar
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### Admin - rechazar medio con motivo
+POST {{baseUrl}}/api/admin/medios-pago/{{medioPagoPendienteId}}/rechazar
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "motivo": "Datos inconsistentes"
+}
+
+### Subastas - listado invitado sin precios
+GET {{baseUrl}}/api/subastas
+
+### Subastas - catalogo invitado sin precios
+GET {{baseUrl}}/api/subastas/{{subastaId}}/catalogo
+
+### Subastas - catalogo autenticado con precios
+GET {{baseUrl}}/api/subastas/{{subastaId}}/catalogo
+Authorization: Bearer {{accessToken}}
+
+### Subastas - inscripcion previa
+POST {{baseUrl}}/api/subastas/{{subastaId}}/inscribirse
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "medioPagoId": {{medioPagoId}}
+}
+
+### Subastas - verificacion de acceso
+POST {{baseUrl}}/api/subastas/{{subastaId}}/verificacion
+Authorization: Bearer {{accessToken}}
+
+### Subastas - puja actual autorizada
+GET {{baseUrl}}/api/subastas/{{subastaId}}/puja-actual
+Authorization: Bearer {{accessToken}}
+
+### Subastas - pujar con version e idempotencia
+POST {{baseUrl}}/api/subastas/{{subastaId}}/pujar
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "itemCatalogoId": {{itemCatalogoId}},
+  "monto": 25300,
+  "medioPagoId": {{medioPagoId}},
+  "clientStateVersion": 1,
+  "idempotencyKey": "http-demo-puja-001"
+}
+
+### Admin - crear subasta monomoneda
+POST {{baseUrl}}/api/admin/subastas
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "fecha": "2030-12-20",
+  "hora": "18:30:00",
+  "titulo": "Subasta HTTP demo",
+  "descripcion": "Subasta creada manualmente",
+  "ubicacion": "Casa central",
+  "categoria": "comun",
+  "moneda": "ARS",
+  "segmento": "demo",
+  "permiteInscripcionOnline": true
+}
+
+### Admin - abrir subasta
+POST {{baseUrl}}/api/admin/subastas/{{subastaId}}/abrir
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### Admin - setear item activo
+POST {{baseUrl}}/api/admin/subastas/{{subastaId}}/item-activo
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "itemCatalogoId": {{itemCatalogoId}}
+}
+
+### Admin - cerrar lote y crear compra
+POST {{baseUrl}}/api/admin/subastas/{{subastaId}}/cerrar-lote
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### Admin - cerrar subasta sin lote activo
+POST {{baseUrl}}/api/admin/subastas/{{subastaId}}/cerrar
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### Compras - listar propias
+GET {{baseUrl}}/api/compras?page=0&size=20
+Authorization: Bearer {{accessToken}}
+
+### Compras - detalle propio
+GET {{baseUrl}}/api/compras/{{compraId}}
+Authorization: Bearer {{accessToken}}
+
+### Compras - configurar envio
+PUT {{baseUrl}}/api/compras/{{compraId}}/entrega
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "tipo": "envio",
+  "direccionEnvioId": 5101
+}
+
+### Compras - pagar extras
+POST {{baseUrl}}/api/compras/{{compraId}}/pagar
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "medioPagoId": {{medioPagoId}},
+  "idempotencyKey": "http-demo-extras-001"
+}
+
+### Compras - pagar adjudicacion con multa
+# Usar accessToken obtenido con multa@quickbid.demo.
+POST {{baseUrl}}/api/compras/{{compraMultaId}}/pagar-con-multa
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "medioPagoId": 5004,
+  "idempotencyKey": "http-demo-multa-001"
+}
+
+### Admin - vencer multa
+POST {{baseUrl}}/api/admin/multas/{{multaId}}/vencer
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### Admin - simular pago exitoso de extras
+POST {{baseUrl}}/api/admin/compras/{{compraId}}/simular-pago-exitoso
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "cuentaId": 3001,
+  "medioPagoId": 5001,
+  "tipo": "extras"
+}
+
+### Admin - simular falla de pago
+POST {{baseUrl}}/api/admin/compras/{{compraId}}/simular-falla-pago
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "cuentaId": 3001,
+  "medioPagoId": 5001,
+  "tipo": "extras"
+}
+
+### Admin - marcar multa pagada manualmente
+POST {{baseUrl}}/api/admin/multas/{{multaId}}/marcar-pagada
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### Consignacion - requisitos
+# Usar accessToken obtenido con consignador@quickbid.demo.
+GET {{baseUrl}}/api/consignaciones/requisitos
+Authorization: Bearer {{accessToken}}
+
+### Consignacion - crear solicitud con seis imagenes reales
+POST {{baseUrl}}/api/consignaciones
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=QuickBidBoundary
+
+--QuickBidBoundary
+Content-Disposition: form-data; name="segmento"
+
+comun
+--QuickBidBoundary
+Content-Disposition: form-data; name="aceptaTyC"
+
+true
+--QuickBidBoundary
+Content-Disposition: form-data; name="declaracionPropiedadYOrigenLicito"
+
+true
+--QuickBidBoundary
+Content-Disposition: form-data; name="titulo"
+
+Vasija HTTP demo
+--QuickBidBoundary
+Content-Disposition: form-data; name="descripcion"
+
+Solicitud creada desde api-examples.http
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotos"; filename="foto-01.png"
+Content-Type: image/png
+
+< ./fixturesv1/foto-01.png
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotos"; filename="foto-02.png"
+Content-Type: image/png
+
+< ./fixturesv1/foto-02.png
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotos"; filename="foto-03.png"
+Content-Type: image/png
+
+< ./fixturesv1/foto-03.png
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotos"; filename="foto-04.png"
+Content-Type: image/png
+
+< ./fixturesv1/foto-04.png
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotos"; filename="foto-05.png"
+Content-Type: image/png
+
+< ./fixturesv1/foto-05.png
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotos"; filename="foto-06.png"
+Content-Type: image/png
+
+< ./fixturesv1/foto-06.png
+--QuickBidBoundary--
+
+### Admin - pedir documentacion de origen
+POST {{baseUrl}}/api/admin/consignaciones/{{consignacionId}}/pedir-documentacion
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### Consignacion - subir documentacion de origen
+POST {{baseUrl}}/api/consignaciones/{{consignacionId}}/documentacion-origen
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=QuickBidBoundary
+
+--QuickBidBoundary
+Content-Disposition: form-data; name="facturaCompra"; filename="factura-demo.pdf"
+Content-Type: application/pdf
+
+< ./fixturesv1/factura-demo.pdf
+--QuickBidBoundary
+Content-Disposition: form-data; name="observaciones"
+
+Factura de compra ficticia
+--QuickBidBoundary--
+
+### Admin - revisar documentacion adicional
+POST {{baseUrl}}/api/admin/consignaciones/{{consignacionId}}/revisar-documentacion
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "aprobada": true
+}
+
+### Admin - aprobar revision digital
+POST {{baseUrl}}/api/admin/consignaciones/{{consignacionId}}/aprobar-revision-digital
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### Admin - marcar recepcion fisica
+POST {{baseUrl}}/api/admin/consignaciones/{{consignacionId}}/marcar-recibida-fisicamente
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### Admin - aprobar revision fisica
+POST {{baseUrl}}/api/admin/consignaciones/{{consignacionId}}/aprobar-revision-fisica
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### Admin - verificar consignador como duenio
+POST {{baseUrl}}/api/admin/consignadores/3004/verificar-duenio
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "financiera": true,
+  "judicial": true,
+  "riesgo": 1
+}
+
+### Admin - proponer acuerdo
+POST {{baseUrl}}/api/admin/consignaciones/{{consignacionAcuerdoId}}/proponer-acuerdo
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "valorBase": 100000,
+  "moneda": "ARS",
+  "comisionCompradorPct": 10,
+  "comisionVendedorPct": 15,
+  "condiciones": "Condiciones demo"
+}
+
+### Consignacion - aceptar acuerdo
+POST {{baseUrl}}/api/consignaciones/{{consignacionAcuerdoId}}/acuerdo/aceptar
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "leyoContrato": true,
+  "aceptaClausulasPlazos": true
+}
+
+### Consignacion - rechazar acuerdo
+POST {{baseUrl}}/api/consignaciones/{{consignacionAcuerdoId}}/acuerdo/rechazar
+Authorization: Bearer {{accessToken}}
+
+### Admin - asignar consignacion aceptada a subasta y catalogo
+POST {{baseUrl}}/api/admin/consignaciones/{{consignacionPublicableId}}/asignar-subasta
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "subastaId": 6004,
+  "catalogoId": 7004
+}
+
+### Admin - liquidar consignacion vendida
+POST {{baseUrl}}/api/admin/consignaciones/16007/liquidar
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "medioPagoId": 5005
+}

@@ -1,0 +1,3 @@
+package com.example.quickbid.quickbid.repository.app;
+import java.util.*; import org.springframework.data.jpa.repository.JpaRepository; import com.example.quickbid.quickbid.entity.app.MedioPago;
+public interface MedioPagoRepository extends JpaRepository<MedioPago,Long>{List<MedioPago> findAllByCuentaIdAndDeletedAtIsNullOrderByCreatedAtDesc(Long cuenta);Optional<MedioPago> findByIdAndCuentaId(Long id,Long cuenta);Optional<MedioPago> findByCuentaIdAndHashIdentificadorAndDeletedAtIsNull(Long cuenta,String hash);List<MedioPago> findAllByCuentaIdAndMonedaAndPrincipalTrueAndDeletedAtIsNull(Long cuenta,String moneda);}

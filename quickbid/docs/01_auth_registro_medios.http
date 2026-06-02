@@ -1,0 +1,252 @@
+# -----------------------------------------------------------------------------
+# QuickBid - variables comunes para REST Client
+# -----------------------------------------------------------------------------
+# Levantar backend antes de usar:
+#   $env:SPRING_PROFILES_ACTIVE="dev"
+#   $env:DB_URL="jdbc:postgresql://localhost:5432/baseQuickbid"
+#   $env:DB_USERNAME="postgres"
+#   $env:DB_PASSWORD="TU_PASSWORD_POSTGRES"
+#   $env:APP_JWT_SECRET="quickbid-secret-local-de-prueba-super-largo-123456"
+#   $env:APP_ADMIN_ENABLED="true"
+#   $env:APP_ADMIN_INTERNAL_KEY="test-admin-key"
+#   $env:APP_MAIL_ENABLED="false"
+#   .\mvnw.cmd spring-boot:run
+# -----------------------------------------------------------------------------
+
+@baseUrl = http://localhost:8080
+@adminKey = test-admin-key
+
+@cuentaAprobadaId = 3001
+@cuentaMultaId = 3002
+@cuentaConsignadorId = 3004
+@medioPagoAprobadoArsId = 5001
+@medioPagoPendienteChequeId = 5003
+@medioPagoMultaArsId = 5004
+@medioPagoConsignadorArsId = 5005
+@subastaEnVivoId = 6001
+@subastaEspecialUsdId = 6002
+@subastaCerradaId = 6003
+@subastaPublicableId = 6004
+@catalogoPublicableId = 7004
+@itemActivoId = 9001
+@itemPublicadoId = 9002
+@compraMultaId = 13001
+@compraPagosExtraId = 13002
+@multaId = 14001
+@consignacionPendienteId = 16001
+@consignacionDocumentacionId = 16002
+@consignacionFisicaId = 16003
+@consignacionAcuerdoId = 16004
+@consignacionPublicableId = 16008
+@consignacionDevolucionId = 16006
+
+@accessAprobado = {{loginAprobado.response.body.$.data.accessToken}}
+@refreshAprobado = {{loginAprobado.response.body.$.data.refreshToken}}
+@accessConsignador = {{loginConsignador.response.body.$.data.accessToken}}
+@refreshConsignador = {{loginConsignador.response.body.$.data.refreshToken}}
+@accessMulta = {{loginMulta.response.body.$.data.accessToken}}
+@refreshMulta = {{loginMulta.response.body.$.data.refreshToken}}
+
+### 00 - Health
+GET {{baseUrl}}/actuator/health
+
+### 01 - Auth - Login usuario aprobado
+# @name loginAprobado
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "aprobado@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+### 02 - Auth - Login usuario consignador
+# @name loginConsignador
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "consignador@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+### 03 - Auth - Login usuario con restriccion por multa
+# @name loginMulta
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "multa@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+### 04 - Auth - Login usuario bloqueado debe devolver 403
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "bloqueado@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+# -----------------------------------------------------------------------------
+# ESCENARIO 01: auth, perfil, dirección y medios de pago.
+# Recomendación: ejecutar sobre base limpia. Algunos POST dan 409 si se repiten.
+# -----------------------------------------------------------------------------
+
+### 05 - Usuario - Direccion de envio - actualizar
+PUT {{baseUrl}}/api/usuario/direccion-envio
+Authorization: Bearer {{accessAprobado}}
+Content-Type: application/json
+
+{
+  "alias": "Casa",
+  "destinatario": "Ana Aprobada",
+  "calle": "Av. Demo",
+  "numero": "100",
+  "piso": "2B",
+  "codigoPostal": "C1000",
+  "localidad": "Buenos Aires",
+  "provincia": "Buenos Aires",
+  "pais": "Argentina",
+  "telefono": "+54 11 5555 0101"
+}
+
+### 06 - Usuario - Direccion de envio - obtener
+GET {{baseUrl}}/api/usuario/direccion-envio
+Authorization: Bearer {{accessAprobado}}
+
+### 07 - Medios de pago - listar propios aprobado
+GET {{baseUrl}}/api/usuario/medios-pago
+Authorization: Bearer {{accessAprobado}}
+
+### 08 - Medios de pago - registrar tarjeta ficticia pendiente
+# @name crearTarjetaAprobado
+POST {{baseUrl}}/api/usuario/medios-pago
+Authorization: Bearer {{accessAprobado}}
+Content-Type: application/json
+
+{
+  "tipo": "tarjeta",
+  "moneda": "ARS",
+  "nacional": true,
+  "titular": "Ana Aprobada",
+  "numeroTarjeta": "4111111111111111",
+  "cvv": "123",
+  "vencimientoMes": 12,
+  "vencimientoAnio": 2030,
+  "marca": "Visa"
+}
+
+### 09 - Medios de pago - registrar cuenta bancaria pendiente
+# @name crearCuentaBancariaAprobado
+POST {{baseUrl}}/api/usuario/medios-pago
+Authorization: Bearer {{accessAprobado}}
+Content-Type: application/json
+
+{
+  "tipo": "cuenta_bancaria",
+  "moneda": "ARS",
+  "nacional": true,
+  "titular": "Ana Aprobada",
+  "numeroCuenta": "000123456789",
+  "cbuCvu": "0000003100012345678901",
+  "nombreBanco": "Banco Demo Argentina",
+  "alias": "ANA.DEMO.ARS"
+}
+
+### 10 - Medios de pago - registrar cheque con imagenes reales
+# @name crearChequeAprobado
+POST {{baseUrl}}/api/usuario/medios-pago
+Authorization: Bearer {{accessAprobado}}
+Content-Type: multipart/form-data; boundary=QuickBidBoundary
+
+--QuickBidBoundary
+Content-Disposition: form-data; name="moneda"
+
+ARS
+--QuickBidBoundary
+Content-Disposition: form-data; name="nacional"
+
+true
+--QuickBidBoundary
+Content-Disposition: form-data; name="titular"
+
+Ana Aprobada
+--QuickBidBoundary
+Content-Disposition: form-data; name="numeroCheque"
+
+CHK-DEMO-HTTP-{{$timestamp}}
+--QuickBidBoundary
+Content-Disposition: form-data; name="monto"
+
+150000
+--QuickBidBoundary
+Content-Disposition: form-data; name="fechaVencimiento"
+
+2030-12-31
+--QuickBidBoundary
+Content-Disposition: form-data; name="bancoEmisor"
+
+Banco Demo
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotoAnverso"; filename="cheque-frente.png"
+Content-Type: image/png
+
+< ./fixtures/cheque-frente.png
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotoReverso"; filename="cheque-dorso.png"
+Content-Type: image/png
+
+< ./fixtures/cheque-dorso.png
+--QuickBidBoundary--
+
+### 11 - Admin - Listar medios pendientes
+GET {{baseUrl}}/api/admin/medios-pago?estado=pendiente_verificacion
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### 12 - Admin - Verificar cheque creado en request 10
+POST {{baseUrl}}/api/admin/medios-pago/{{crearChequeAprobado.response.body.$.data.id}}/verificar
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### 13 - Admin - Rechazar tarjeta creada en request 08
+POST {{baseUrl}}/api/admin/medios-pago/{{crearTarjetaAprobado.response.body.$.data.id}}/rechazar
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "motivo": "Datos inconsistentes para prueba manual"
+}
+
+### 14 - Registro etapa 1 con email unico
+# @name registroEtapa1
+POST {{baseUrl}}/api/auth/registro/etapa1
+Content-Type: application/json
+
+{
+  "email": "nuevo{{$timestamp}}@quickbid.demo",
+  "nombre": "Nuevo",
+  "apellido": "Demo",
+  "domicilioLegal": "Calle Demo 123",
+  "idPaisOrigen": 1
+}
+
+### 15 - Registro etapa 2 con DNI demo
+POST {{baseUrl}}/api/auth/registro/etapa2
+Content-Type: multipart/form-data; boundary=QuickBidBoundary
+
+--QuickBidBoundary
+Content-Disposition: form-data; name="email"
+
+{{registroEtapa1.request.body.$.email}}
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotoFrente"; filename="dni-frente.png"
+Content-Type: image/png
+
+< ./fixtures/dni-frente.png
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotoDorso"; filename="dni-dorso.png"
+Content-Type: image/png
+
+< ./fixtures/dni-dorso.png
+--QuickBidBoundary--

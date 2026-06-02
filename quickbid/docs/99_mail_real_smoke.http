@@ -1,0 +1,108 @@
+# -----------------------------------------------------------------------------
+# QuickBid - variables comunes para REST Client
+# -----------------------------------------------------------------------------
+# Levantar backend antes de usar:
+#   $env:SPRING_PROFILES_ACTIVE="dev"
+#   $env:DB_URL="jdbc:postgresql://localhost:5432/baseQuickbid"
+#   $env:DB_USERNAME="postgres"
+#   $env:DB_PASSWORD="TU_PASSWORD_POSTGRES"
+#   $env:APP_JWT_SECRET="quickbid-secret-local-de-prueba-super-largo-123456"
+#   $env:APP_ADMIN_ENABLED="true"
+#   $env:APP_ADMIN_INTERNAL_KEY="test-admin-key"
+#   $env:APP_MAIL_ENABLED="false"
+#   .\mvnw.cmd spring-boot:run
+# -----------------------------------------------------------------------------
+
+@baseUrl = http://localhost:8080
+@adminKey = test-admin-key
+
+@cuentaAprobadaId = 3001
+@cuentaMultaId = 3002
+@cuentaConsignadorId = 3004
+@medioPagoAprobadoArsId = 5001
+@medioPagoPendienteChequeId = 5003
+@medioPagoMultaArsId = 5004
+@medioPagoConsignadorArsId = 5005
+@subastaEnVivoId = 6001
+@subastaEspecialUsdId = 6002
+@subastaCerradaId = 6003
+@subastaPublicableId = 6004
+@catalogoPublicableId = 7004
+@itemActivoId = 9001
+@itemPublicadoId = 9002
+@compraMultaId = 13001
+@compraPagosExtraId = 13002
+@multaId = 14001
+@consignacionPendienteId = 16001
+@consignacionDocumentacionId = 16002
+@consignacionFisicaId = 16003
+@consignacionAcuerdoId = 16004
+@consignacionPublicableId = 16008
+@consignacionDevolucionId = 16006
+
+@accessAprobado = {{loginAprobado.response.body.$.data.accessToken}}
+@refreshAprobado = {{loginAprobado.response.body.$.data.refreshToken}}
+@accessConsignador = {{loginConsignador.response.body.$.data.accessToken}}
+@refreshConsignador = {{loginConsignador.response.body.$.data.refreshToken}}
+@accessMulta = {{loginMulta.response.body.$.data.accessToken}}
+@refreshMulta = {{loginMulta.response.body.$.data.refreshToken}}
+
+### 00 - Health
+GET {{baseUrl}}/actuator/health
+
+### 01 - Auth - Login usuario aprobado
+# @name loginAprobado
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "aprobado@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+### 02 - Auth - Login usuario consignador
+# @name loginConsignador
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "consignador@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+### 03 - Auth - Login usuario con restriccion por multa
+# @name loginMulta
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "multa@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+### 04 - Auth - Login usuario bloqueado debe devolver 403
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "bloqueado@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+# -----------------------------------------------------------------------------
+# ESCENARIO 99: prueba SMTP real.
+# Reiniciar backend antes con APP_MAIL_ENABLED=true y variables SPRING_MAIL_*.
+# No automatiza la validacion de casilla: revisar el email manualmente.
+# -----------------------------------------------------------------------------
+
+### 05 - Recuperacion de clave: deberia enviar email real si SMTP esta activo
+POST {{baseUrl}}/api/auth/recuperar-clave
+Content-Type: application/json
+
+{
+  "email": "aprobado@quickbid.demo"
+}
+
+### 06 - Admin verifica medio pendiente y dispara mail de notificacion si SMTP activo
+POST {{baseUrl}}/api/admin/medios-pago/{{medioPagoPendienteChequeId}}/verificar
+X-QuickBid-Admin-Key: {{adminKey}}

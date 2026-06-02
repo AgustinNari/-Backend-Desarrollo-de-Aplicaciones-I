@@ -1,0 +1,268 @@
+# -----------------------------------------------------------------------------
+# QuickBid - variables comunes para REST Client
+# -----------------------------------------------------------------------------
+# Levantar backend antes de usar:
+#   $env:SPRING_PROFILES_ACTIVE="dev"
+#   $env:DB_URL="jdbc:postgresql://localhost:5432/baseQuickbid"
+#   $env:DB_USERNAME="postgres"
+#   $env:DB_PASSWORD="TU_PASSWORD_POSTGRES"
+#   $env:APP_JWT_SECRET="quickbid-secret-local-de-prueba-super-largo-123456"
+#   $env:APP_ADMIN_ENABLED="true"
+#   $env:APP_ADMIN_INTERNAL_KEY="test-admin-key"
+#   $env:APP_MAIL_ENABLED="false"
+#   .\mvnw.cmd spring-boot:run
+# -----------------------------------------------------------------------------
+
+@baseUrl = http://localhost:8080
+@adminKey = test-admin-key
+
+@cuentaAprobadaId = 3001
+@cuentaMultaId = 3002
+@cuentaConsignadorId = 3004
+@medioPagoAprobadoArsId = 5001
+@medioPagoPendienteChequeId = 5003
+@medioPagoMultaArsId = 5004
+@medioPagoConsignadorArsId = 5005
+@subastaEnVivoId = 6001
+@subastaEspecialUsdId = 6002
+@subastaCerradaId = 6003
+@subastaPublicableId = 6004
+@catalogoPublicableId = 7004
+@itemActivoId = 9001
+@itemPublicadoId = 9002
+@compraMultaId = 13001
+@compraPagosExtraId = 13002
+@multaId = 14001
+@consignacionPendienteId = 16001
+@consignacionDocumentacionId = 16002
+@consignacionFisicaId = 16003
+@consignacionAcuerdoId = 16004
+@consignacionPublicableId = 16008
+@consignacionDevolucionId = 16006
+
+@accessAprobado = {{loginAprobado.response.body.$.data.accessToken}}
+@refreshAprobado = {{loginAprobado.response.body.$.data.refreshToken}}
+@accessConsignador = {{loginConsignador.response.body.$.data.accessToken}}
+@refreshConsignador = {{loginConsignador.response.body.$.data.refreshToken}}
+@accessMulta = {{loginMulta.response.body.$.data.accessToken}}
+@refreshMulta = {{loginMulta.response.body.$.data.refreshToken}}
+
+### 00 - Health
+GET {{baseUrl}}/actuator/health
+
+### 01 - Auth - Login usuario aprobado
+# @name loginAprobado
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "aprobado@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+### 02 - Auth - Login usuario consignador
+# @name loginConsignador
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "consignador@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+### 03 - Auth - Login usuario con restriccion por multa
+# @name loginMulta
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "multa@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+### 04 - Auth - Login usuario bloqueado debe devolver 403
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "bloqueado@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+# -----------------------------------------------------------------------------
+# ESCENARIO 04: consignacion nueva, lineal y sin pisar seeds.
+# Ejecutar sobre base limpia o al menos no repetir el mismo flujo sin crear nueva.
+# Este flujo usa SIEMPRE el id creado por el request 05.
+# -----------------------------------------------------------------------------
+
+@newConsignacionId = {{crearConsignacionNueva.response.body.$.data.id}}
+
+### 05 - Consignacion - Requisitos consignador
+GET {{baseUrl}}/api/consignaciones/requisitos
+Authorization: Bearer {{accessConsignador}}
+
+### 06 - Consignacion - Crear solicitud nueva con seis imagenes reales
+# @name crearConsignacionNueva
+POST {{baseUrl}}/api/consignaciones
+Authorization: Bearer {{accessConsignador}}
+Content-Type: multipart/form-data; boundary=QuickBidBoundary
+
+--QuickBidBoundary
+Content-Disposition: form-data; name="segmento"
+
+comun
+--QuickBidBoundary
+Content-Disposition: form-data; name="aceptaTyC"
+
+true
+--QuickBidBoundary
+Content-Disposition: form-data; name="declaracionPropiedadYOrigenLicito"
+
+true
+--QuickBidBoundary
+Content-Disposition: form-data; name="titulo"
+
+Vasija HTTP demo {{$timestamp}}
+--QuickBidBoundary
+Content-Disposition: form-data; name="descripcion"
+
+Solicitud creada desde escenario 04.
+--QuickBidBoundary
+Content-Disposition: form-data; name="historia"
+
+Pieza de demostracion para prueba manual.
+--QuickBidBoundary
+Content-Disposition: form-data; name="fechaAproximada"
+
+1980
+--QuickBidBoundary
+Content-Disposition: form-data; name="esObraDeArte"
+
+false
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotos"; filename="foto-01.png"
+Content-Type: image/png
+
+< ./fixtures/foto-01.png
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotos"; filename="foto-02.png"
+Content-Type: image/png
+
+< ./fixtures/foto-02.png
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotos"; filename="foto-03.png"
+Content-Type: image/png
+
+< ./fixtures/foto-03.png
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotos"; filename="foto-04.png"
+Content-Type: image/png
+
+< ./fixtures/foto-04.png
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotos"; filename="foto-05.png"
+Content-Type: image/png
+
+< ./fixtures/foto-05.png
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotos"; filename="foto-06.png"
+Content-Type: image/png
+
+< ./fixtures/foto-06.png
+--QuickBidBoundary--
+
+### 07 - Consignacion - Detalle nueva
+GET {{baseUrl}}/api/consignaciones/{{newConsignacionId}}
+Authorization: Bearer {{accessConsignador}}
+
+### 08 - Admin - Pedir documentacion sobre la nueva
+POST {{baseUrl}}/api/admin/consignaciones/{{newConsignacionId}}/pedir-documentacion
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "motivo": "Se requiere factura o comprobante de origen"
+}
+
+### 09 - Consignacion - Subir documentacion de origen sobre la nueva
+POST {{baseUrl}}/api/consignaciones/{{newConsignacionId}}/documentacion-origen
+Authorization: Bearer {{accessConsignador}}
+Content-Type: multipart/form-data; boundary=QuickBidBoundary
+
+--QuickBidBoundary
+Content-Disposition: form-data; name="facturaCompra"; filename="factura-demo.pdf"
+Content-Type: application/pdf
+
+< ./fixtures/factura-demo.pdf
+--QuickBidBoundary
+Content-Disposition: form-data; name="observaciones"
+
+Factura de compra ficticia para prueba manual.
+--QuickBidBoundary--
+
+### 10 - Admin - Revisar documentacion adicional aprobada
+# Si este request deja la consignacion lista para recepcion fisica, seguir con 11.
+POST {{baseUrl}}/api/admin/consignaciones/{{newConsignacionId}}/revisar-documentacion
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "aprobada": true,
+  "motivo": "Documentacion suficiente"
+}
+
+### 11 - Admin - Marcar recepcion fisica
+POST {{baseUrl}}/api/admin/consignaciones/{{newConsignacionId}}/marcar-recibida-fisicamente
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "ubicacionFisica": "Deposito HTTP A1"
+}
+
+### 12 - Admin - Aprobar revision fisica
+POST {{baseUrl}}/api/admin/consignaciones/{{newConsignacionId}}/aprobar-revision-fisica
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "motivo": "Estado fisico correcto"
+}
+
+### 13 - Admin - Verificar consignador como duenio
+POST {{baseUrl}}/api/admin/consignadores/{{cuentaConsignadorId}}/verificar-duenio
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "financiera": true,
+  "judicial": true,
+  "riesgo": 1
+}
+
+### 14 - Admin - Proponer acuerdo sobre la nueva
+POST {{baseUrl}}/api/admin/consignaciones/{{newConsignacionId}}/proponer-acuerdo
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "valorBase": 100000,
+  "moneda": "ARS",
+  "comisionCompradorPct": 10,
+  "comisionVendedorPct": 15,
+  "condiciones": "Condiciones demo para consignacion nueva"
+}
+
+### 15 - Consignacion - Aceptar acuerdo de la nueva
+POST {{baseUrl}}/api/consignaciones/{{newConsignacionId}}/acuerdo/aceptar
+Authorization: Bearer {{accessConsignador}}
+Content-Type: application/json
+
+{
+  "leyoContrato": true,
+  "aceptaClausulasPlazos": true
+}
+
+### 16 - Consignacion - Detalle final de la nueva
+GET {{baseUrl}}/api/consignaciones/{{newConsignacionId}}
+Authorization: Bearer {{accessConsignador}}
