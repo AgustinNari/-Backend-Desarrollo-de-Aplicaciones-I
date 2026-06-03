@@ -1,0 +1,615 @@
+# QuickBid - pruebas locales manuales con VS Code REST Client
+# -----------------------------------------------------------------------------
+# Como usar este archivo:
+# 1) Levanta el backend local en http://localhost:8080 con APP_ADMIN_ENABLED=true
+#    y APP_ADMIN_INTERNAL_KEY=test-admin-key.
+# 2) Ejecuta primero: Health, luego Login aprobado, Login consignador y Login multa.
+# 3) Luego ejecuta las secciones en orden. Los tokens se toman automaticamente
+#    desde las respuestas de login usando variables de REST Client.
+#
+# Si una request falla por regla de negocio, revisa data/message/errors.
+# No todo error es bug: por ejemplo 401 sin token, 403 admin sin key, 409 estado viejo,
+# o 422 validacion de negocio pueden ser correctos.
+#
+# IMPORTANTE sobre mails:
+# APP_MAIL_ENABLED=false usa mail simulado. Para probar SMTP real, reiniciar backend
+# con APP_MAIL_ENABLED=true, APP_MAIL_FROM, APP_FRONTEND_BASE_URL y SPRING_MAIL_*.
+# -----------------------------------------------------------------------------
+
+@baseUrl = http://localhost:8080
+@adminKey = test-admin-key
+
+# IDs seed demo principales. Funcionan si levantaste desde base limpia con Flyway.
+@cuentaAprobadaId = 3001
+@cuentaMultaId = 3002
+@cuentaConsignadorId = 3004
+@medioPagoAprobadoArsId = 5001
+@medioPagoPendienteChequeId = 5003
+@medioPagoMultaArsId = 5004
+@medioPagoConsignadorArsId = 5005
+@direccionEnvioAprobadoId = 5101
+@subastaEnVivoId = 6001
+@subastaEspecialUsdId = 6002
+@subastaCerradaId = 6003
+@subastaPublicableId = 6004
+@catalogoPublicableId = 7004
+@itemActivoId = 9001
+@itemPublicadoId = 9002
+@compraMultaId = 13001
+@compraPagosExtraId = 13002
+@multaId = 14001
+@consignacionPendienteId = 16001
+@consignacionDocumentacionId = 16002
+@consignacionFisicaId = 16003
+@consignacionAcuerdoId = 16004
+@consignacionDevolucionId = 16006
+@consignacionLiquidadaId = 16007
+@consignacionPublicableId = 16008
+
+# Tokens automaticos luego de ejecutar los logins:
+@accessAprobado = {{loginAprobado.response.body.$.data.accessToken}}
+@refreshAprobado = {{loginAprobado.response.body.$.data.refreshToken}}
+@accessConsignador = {{loginConsignador.response.body.$.data.accessToken}}
+@refreshConsignador = {{loginConsignador.response.body.$.data.refreshToken}}
+@accessMulta = {{loginMulta.response.body.$.data.accessToken}}
+@refreshMulta = {{loginMulta.response.body.$.data.refreshToken}}
+
+### 00 - Health
+GET {{baseUrl}}/actuator/health
+
+### 01 - Auth - Login usuario aprobado
+# @name loginAprobado
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "aprobado@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+### 02 - Auth - Login usuario consignador
+# @name loginConsignador
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "consignador@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+### 03 - Auth - Login usuario con restriccion por multa
+# @name loginMulta
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "multa@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+### 04 - Auth - Login usuario bloqueado debe devolver 403
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "bloqueado@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+### 05 - Auth - Sesion actual
+GET {{baseUrl}}/api/auth/sesion
+Authorization: Bearer {{accessAprobado}}
+
+### 06 - Auth - Refresh usuario aprobado
+POST {{baseUrl}}/api/auth/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "{{refreshAprobado}}"
+}
+
+### 07 - Auth - Solicitar recuperacion de clave
+# Con mail real activo deberia enviar email. Con mail simulado solo registra metadata.
+POST {{baseUrl}}/api/auth/recuperar-clave
+Content-Type: application/json
+
+{
+  "email": "aprobado@quickbid.demo"
+}
+
+### 08 - Usuario - Perfil aprobado
+GET {{baseUrl}}/api/usuario/perfil
+Authorization: Bearer {{accessAprobado}}
+
+### 09 - Usuario - Estadisticas
+GET {{baseUrl}}/api/usuario/estadisticas
+Authorization: Bearer {{accessAprobado}}
+
+### 10 - Usuario - Historial
+GET {{baseUrl}}/api/usuario/historial?page=0&size=20
+Authorization: Bearer {{accessAprobado}}
+
+### 11 - Usuario - Notificaciones no leidas
+GET {{baseUrl}}/api/usuario/notificaciones?leida=false&page=0&size=20
+Authorization: Bearer {{accessAprobado}}
+
+### 12 - Usuario - Direccion de envio - actualizar
+PUT {{baseUrl}}/api/usuario/direccion-envio
+Authorization: Bearer {{accessAprobado}}
+Content-Type: application/json
+
+{
+  "alias": "Casa",
+  "destinatario": "Ana Aprobada",
+  "calle": "Av. Demo",
+  "numero": "100",
+  "piso": "2B",
+  "codigoPostal": "C1000",
+  "localidad": "Buenos Aires",
+  "provincia": "Buenos Aires",
+  "pais": "Argentina",
+  "telefono": "+54 11 5555 0101"
+}
+
+### 13 - Usuario - Direccion de envio - obtener
+GET {{baseUrl}}/api/usuario/direccion-envio
+Authorization: Bearer {{accessAprobado}}
+
+### 14 - Medios de pago - listar propios aprobado
+GET {{baseUrl}}/api/usuario/medios-pago
+Authorization: Bearer {{accessAprobado}}
+
+### 15 - Medios de pago - registrar tarjeta ficticia pendiente
+# Ejecutar una sola vez por base limpia. Si repetis, puede dar 409 por duplicado.
+# @name crearTarjetaAprobado
+POST {{baseUrl}}/api/usuario/medios-pago
+Authorization: Bearer {{accessAprobado}}
+Content-Type: application/json
+
+{
+  "tipo": "tarjeta",
+  "moneda": "ARS",
+  "nacional": true,
+  "titular": "Ana Aprobada",
+  "numeroTarjeta": "4111111111111111",
+  "cvv": "123",
+  "vencimientoMes": 12,
+  "vencimientoAnio": 2030,
+  "marca": "Visa"
+}
+
+### 16 - Medios de pago - registrar cuenta bancaria pendiente
+# Ejecutar una sola vez por base limpia. Si repetis, puede dar 409 por duplicado.
+# @name crearCuentaBancariaAprobado
+POST {{baseUrl}}/api/usuario/medios-pago
+Authorization: Bearer {{accessAprobado}}
+Content-Type: application/json
+
+{
+  "tipo": "cuenta_bancaria",
+  "moneda": "ARS",
+  "nacional": true,
+  "titular": "Ana Aprobada",
+  "numeroCuenta": "000123456789",
+  "cbuCvu": "0000003100012345678901",
+  "nombreBanco": "Banco Demo Argentina",
+  "alias": "ANA.DEMO.ARS"
+}
+
+### 17 - Medios de pago - registrar cheque con imagenes reales
+# Ejecutar una sola vez por base limpia. Usa fixturesv1/cheque-frente.png y fixturesv1/cheque-dorso.png.
+# @name crearChequeAprobado
+POST {{baseUrl}}/api/usuario/medios-pago
+Authorization: Bearer {{accessAprobado}}
+Content-Type: multipart/form-data; boundary=QuickBidBoundary
+
+--QuickBidBoundary
+Content-Disposition: form-data; name="moneda"
+
+ARS
+--QuickBidBoundary
+Content-Disposition: form-data; name="nacional"
+
+true
+--QuickBidBoundary
+Content-Disposition: form-data; name="titular"
+
+Ana Aprobada
+--QuickBidBoundary
+Content-Disposition: form-data; name="numeroCheque"
+
+CHK-DEMO-HTTP-001
+--QuickBidBoundary
+Content-Disposition: form-data; name="monto"
+
+150000
+--QuickBidBoundary
+Content-Disposition: form-data; name="fechaVencimiento"
+
+2030-12-31
+--QuickBidBoundary
+Content-Disposition: form-data; name="bancoEmisor"
+
+Banco Demo
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotoAnverso"; filename="cheque-frente.png"
+Content-Type: image/png
+
+< ./fixturesv1/cheque-frente.png
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotoReverso"; filename="cheque-dorso.png"
+Content-Type: image/png
+
+< ./fixturesv1/cheque-dorso.png
+--QuickBidBoundary--
+
+### 18 - Admin - Sin key debe devolver 401
+GET {{baseUrl}}/api/admin/consignaciones
+
+### 19 - Admin - Listar medios pendientes
+GET {{baseUrl}}/api/admin/medios-pago?estado=pendiente_verificacion
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### 20 - Admin - Verificar cheque pendiente seed 5003
+POST {{baseUrl}}/api/admin/medios-pago/{{medioPagoPendienteChequeId}}/verificar
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### 21 - Admin - Rechazar medio creado manualmente
+# Opcional: reemplazar el id por un medio pendiente real si queres probar rechazo.
+POST {{baseUrl}}/api/admin/medios-pago/{{crearTarjetaAprobado.response.body.$.data.id}}/rechazar
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "motivo": "Datos inconsistentes para prueba manual"
+}
+
+### 22 - Subastas - Listado invitado sin precios
+GET {{baseUrl}}/api/subastas
+
+### 23 - Subastas - Detalle invitado
+GET {{baseUrl}}/api/subastas/{{subastaEnVivoId}}
+
+### 24 - Subastas - Catalogo invitado sin precios
+GET {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/catalogo
+
+### 25 - Subastas - Catalogo autenticado con precios
+GET {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/catalogo
+Authorization: Bearer {{accessAprobado}}
+
+### 26 - Subastas - Detalle item autenticado
+GET {{baseUrl}}/api/items/{{itemActivoId}}
+Authorization: Bearer {{accessAprobado}}
+
+### 27 - Subastas - Verificacion aprobado en subasta live
+POST {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/verificacion
+Authorization: Bearer {{accessAprobado}}
+
+### 28 - Subastas - Puja actual aprobado
+GET {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/puja-actual
+Authorization: Bearer {{accessAprobado}}
+
+### 29 - Subastas - Verificacion multa: puede mirar, no puede pujar
+POST {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/verificacion
+Authorization: Bearer {{accessMulta}}
+
+### 30 - Subastas - Inscripcion previa aprobada
+# Puede fallar si la regla de tiempo/categoria/medio no se cumple. El error tambien es prueba valida.
+POST {{baseUrl}}/api/subastas/{{subastaPublicableId}}/inscribirse
+Authorization: Bearer {{accessAprobado}}
+Content-Type: application/json
+
+{
+  "medioPagoId": {{medioPagoPendienteChequeId}}
+}
+
+### 31 - Pujas - Consignador puja en subasta live sin inscripcion previa obligatoria
+# 6001 tiene mejor oferta seed 25100 sobre item 9001. 25300 deberia respetar el incremento minimo.
+# @name pujaConsignador
+POST {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/pujar
+Authorization: Bearer {{accessConsignador}}
+Content-Type: application/json
+
+{
+  "itemCatalogoId": {{itemActivoId}},
+  "monto": 25300,
+  "medioPagoId": {{medioPagoConsignadorArsId}},
+  "clientStateVersion": 1,
+  "idempotencyKey": "manual-puja-consignador-001"
+}
+
+### 32 - Pujas - Repetir misma idempotencyKey no deberia duplicar
+POST {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/pujar
+Authorization: Bearer {{accessConsignador}}
+Content-Type: application/json
+
+{
+  "itemCatalogoId": {{itemActivoId}},
+  "monto": 25300,
+  "medioPagoId": {{medioPagoConsignadorArsId}},
+  "clientStateVersion": 1,
+  "idempotencyKey": "manual-puja-consignador-001"
+}
+
+### 33 - Pujas - Usuario con multa no puede pujar
+POST {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/pujar
+Authorization: Bearer {{accessMulta}}
+Content-Type: application/json
+
+{
+  "itemCatalogoId": {{itemActivoId}},
+  "monto": 26000,
+  "medioPagoId": {{medioPagoMultaArsId}},
+  "clientStateVersion": 1,
+  "idempotencyKey": "manual-puja-multa-001"
+}
+
+### 34 - Admin - Cerrar lote con pago automatico exitoso
+# Si ya cerraste este lote, devolvera conflicto. Eso es correcto.
+# @name cerrarLote6001
+POST {{baseUrl}}/api/admin/subastas/{{subastaEnVivoId}}/cerrar-lote?resultado=SUCCESS
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### 35 - Compras - Listar propias aprobado
+GET {{baseUrl}}/api/compras?page=0&size=20
+Authorization: Bearer {{accessAprobado}}
+
+### 36 - Compras - Listar propias consignador
+GET {{baseUrl}}/api/compras?page=0&size=20
+Authorization: Bearer {{accessConsignador}}
+
+### 37 - Compras - Detalle compra seed con pagos extra pendientes
+GET {{baseUrl}}/api/compras/{{compraPagosExtraId}}
+Authorization: Bearer {{accessAprobado}}
+
+### 38 - Compras - Configurar retiro
+PUT {{baseUrl}}/api/compras/{{compraPagosExtraId}}/entrega
+Authorization: Bearer {{accessAprobado}}
+Content-Type: application/json
+
+{
+  "tipo": "retiro"
+}
+
+### 39 - Compras - Pagar extras
+POST {{baseUrl}}/api/compras/{{compraPagosExtraId}}/pagar
+Authorization: Bearer {{accessAprobado}}
+Content-Type: application/json
+
+{
+  "medioPagoId": {{medioPagoAprobadoArsId}},
+  "idempotencyKey": "manual-extras-001"
+}
+
+### 40 - Compras - Pagar adjudicacion con multa usando usuario multa
+POST {{baseUrl}}/api/compras/{{compraMultaId}}/pagar-con-multa
+Authorization: Bearer {{accessMulta}}
+Content-Type: application/json
+
+{
+  "medioPagoId": {{medioPagoMultaArsId}},
+  "idempotencyKey": "manual-multa-001"
+}
+
+### 41 - Admin - Vencer multa seed
+# Si ya fue pagada por el request anterior, puede fallar por estado. Ejecutar solo si queres probar vencimiento.
+POST {{baseUrl}}/api/admin/multas/{{multaId}}/vencer
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### 42 - Admin - Simular pago exitoso de extras
+POST {{baseUrl}}/api/admin/compras/{{compraPagosExtraId}}/simular-pago-exitoso
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "cuentaId": {{cuentaAprobadaId}},
+  "medioPagoId": {{medioPagoAprobadoArsId}},
+  "tipo": "extras"
+}
+
+### 43 - Consignacion - Requisitos consignador
+GET {{baseUrl}}/api/consignaciones/requisitos
+Authorization: Bearer {{accessConsignador}}
+
+### 44 - Consignacion - Listar propias consignador
+GET {{baseUrl}}/api/consignaciones?page=0&size=20
+Authorization: Bearer {{accessConsignador}}
+
+### 45 - Consignacion - Crear solicitud con seis imagenes reales
+# Ejecutar una sola vez por base limpia. Usa fixturesv1/foto-01.png ... foto-06.png.
+# @name crearConsignacion
+POST {{baseUrl}}/api/consignaciones
+Authorization: Bearer {{accessConsignador}}
+Content-Type: multipart/form-data; boundary=QuickBidBoundary
+
+--QuickBidBoundary
+Content-Disposition: form-data; name="segmento"
+
+comun
+--QuickBidBoundary
+Content-Disposition: form-data; name="aceptaTyC"
+
+true
+--QuickBidBoundary
+Content-Disposition: form-data; name="declaracionPropiedadYOrigenLicito"
+
+true
+--QuickBidBoundary
+Content-Disposition: form-data; name="titulo"
+
+Vasija HTTP demo
+--QuickBidBoundary
+Content-Disposition: form-data; name="descripcion"
+
+Solicitud creada desde quickbid-local-manual-test.http
+--QuickBidBoundary
+Content-Disposition: form-data; name="historia"
+
+Pieza de demostracion para prueba manual.
+--QuickBidBoundary
+Content-Disposition: form-data; name="fechaAproximada"
+
+1980
+--QuickBidBoundary
+Content-Disposition: form-data; name="esObraDeArte"
+
+false
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotos"; filename="foto-01.png"
+Content-Type: image/png
+
+< ./fixturesv1/foto-01.png
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotos"; filename="foto-02.png"
+Content-Type: image/png
+
+< ./fixturesv1/foto-02.png
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotos"; filename="foto-03.png"
+Content-Type: image/png
+
+< ./fixturesv1/foto-03.png
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotos"; filename="foto-04.png"
+Content-Type: image/png
+
+< ./fixturesv1/foto-04.png
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotos"; filename="foto-05.png"
+Content-Type: image/png
+
+< ./fixturesv1/foto-05.png
+--QuickBidBoundary
+Content-Disposition: form-data; name="fotos"; filename="foto-06.png"
+Content-Type: image/png
+
+< ./fixturesv1/foto-06.png
+--QuickBidBoundary--
+
+### 46 - Admin - Pedir documentacion de origen sobre consignacion seed
+POST {{baseUrl}}/api/admin/consignaciones/{{consignacionPendienteId}}/pedir-documentacion
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### 47 - Consignacion - Subir documentacion de origen
+POST {{baseUrl}}/api/consignaciones/{{consignacionDocumentacionId}}/documentacion-origen
+Authorization: Bearer {{accessConsignador}}
+Content-Type: multipart/form-data; boundary=QuickBidBoundary
+
+--QuickBidBoundary
+Content-Disposition: form-data; name="facturaCompra"; filename="factura-demo.pdf"
+Content-Type: application/pdf
+
+< ./fixturesv1/factura-demo.pdf
+--QuickBidBoundary
+Content-Disposition: form-data; name="observaciones"
+
+Factura de compra ficticia para prueba manual.
+--QuickBidBoundary--
+
+### 48 - Admin - Revisar documentacion adicional
+POST {{baseUrl}}/api/admin/consignaciones/{{consignacionDocumentacionId}}/revisar-documentacion
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "aprobada": true,
+  "motivo": "Documentacion suficiente"
+}
+
+### 49 - Admin - Aprobar revision digital
+POST {{baseUrl}}/api/admin/consignaciones/{{consignacionDocumentacionId}}/aprobar-revision-digital
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### 50 - Admin - Marcar recepcion fisica
+POST {{baseUrl}}/api/admin/consignaciones/{{consignacionFisicaId}}/marcar-recibida-fisicamente
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### 51 - Admin - Aprobar revision fisica
+POST {{baseUrl}}/api/admin/consignaciones/{{consignacionFisicaId}}/aprobar-revision-fisica
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### 52 - Admin - Verificar consignador como duenio
+POST {{baseUrl}}/api/admin/consignadores/{{cuentaConsignadorId}}/verificar-duenio
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "financiera": true,
+  "judicial": true,
+  "riesgo": 1
+}
+
+### 53 - Admin - Intentar proponer acuerdo en consignacion sin estado correcto puede devolver error de negocio
+POST {{baseUrl}}/api/admin/consignaciones/{{consignacionFisicaId}}/proponer-acuerdo
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "valorBase": 100000,
+  "moneda": "ARS",
+  "comisionCompradorPct": 10,
+  "comisionVendedorPct": 15,
+  "condiciones": "Condiciones demo"
+}
+
+### 54 - Consignacion - Aceptar acuerdo seed pendiente
+POST {{baseUrl}}/api/consignaciones/{{consignacionAcuerdoId}}/acuerdo/aceptar
+Authorization: Bearer {{accessConsignador}}
+Content-Type: application/json
+
+{
+  "leyoContrato": true,
+  "aceptaClausulasPlazos": true
+}
+
+### 55 - Consignacion - Seleccionar devolucion por envio en seed con devolucion pendiente
+POST {{baseUrl}}/api/consignaciones/{{consignacionDevolucionId}}/devolucion
+Authorization: Bearer {{accessConsignador}}
+Content-Type: application/json
+
+{
+  "modalidad": "envio",
+  "direccion": "Av. Devolucion 123",
+  "codigoPostal": "C1000",
+  "localidad": "Buenos Aires",
+  "provincia": "Buenos Aires",
+  "telefonoContacto": "+54 11 5555 0202"
+}
+
+### 56 - Consignacion - Pagar envio de devolucion
+POST {{baseUrl}}/api/consignaciones/{{consignacionDevolucionId}}/devolucion/pagar-envio
+Authorization: Bearer {{accessConsignador}}
+Content-Type: application/json
+
+{
+  "medioPagoId": {{medioPagoConsignadorArsId}},
+  "idempotencyKey": "manual-devolucion-001"
+}
+
+### 57 - Admin - Asignar consignacion aceptada a subasta y catalogo
+POST {{baseUrl}}/api/admin/consignaciones/{{consignacionPublicableId}}/asignar-subasta
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "subastaId": {{subastaPublicableId}},
+  "catalogoId": {{catalogoPublicableId}}
+}
+
+### 58 - Admin - Liquidar consignacion ya vendida seed
+# Si ya esta liquidada, puede devolver conflicto/idempotente segun estado. Es util para validar regla.
+POST {{baseUrl}}/api/admin/consignaciones/{{consignacionLiquidadaId}}/liquidar
+X-QuickBid-Admin-Key: {{adminKey}}
+Content-Type: application/json
+
+{
+  "medioPagoId": {{medioPagoConsignadorArsId}}
+}
+
+### 59 - Auth - Logout aprobado
+POST {{baseUrl}}/api/auth/logout
+Content-Type: application/json
+
+{
+  "refreshToken": "{{refreshAprobado}}"
+}
