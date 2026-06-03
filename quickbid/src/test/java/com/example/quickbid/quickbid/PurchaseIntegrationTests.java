@@ -3,6 +3,7 @@ package com.example.quickbid.quickbid;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -241,14 +242,38 @@ class PurchaseIntegrationTests {
 				INSERT INTO app_archivos(id,tipo_contexto,filename_original,content_type,size_bytes,storage_path,checksum)
 				VALUES (5202,'documento_compra','pendiente-demo.pdf','application/pdf',1234,'demo/pendiente.pdf','checksum-pending')
 				""");
+		jdbc.update("""
+				INSERT INTO app_archivos(id,tipo_contexto,filename_original,content_type,size_bytes,storage_path,checksum)
+				VALUES (5203,'documento_compra','rechazado-demo.pdf','application/pdf',1234,'demo/rechazado.pdf','checksum-rejected')
+				""");
 		jdbc.update("INSERT INTO app_documentos(id,tipo,referencia_tipo,referencia_id,archivo_id,estado) VALUES (5301,'factura_compra','compra',13002,5201,'disponible')");
 		jdbc.update("INSERT INTO app_documentos(id,tipo,referencia_tipo,referencia_id,archivo_id,estado) VALUES (5302,'comprobante_interno','compra',13002,5202,'pendiente')");
+		jdbc.update("INSERT INTO app_documentos(id,tipo,referencia_tipo,referencia_id,archivo_id,estado) VALUES (5303,'recibo_rechazado','compra',13002,5203,'rechazado')");
 
-		auth(get("/api/compras/13002/documentos"), "aprobado@quickbid.demo").andExpect(status().isOk())
+		mvc.perform(get("/api/compras/13002/documentos")).andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("UNAUTHORIZED"));
+		mvc.perform(get("/api/compras/13002/documentos").header("Authorization", "Bearer token-invalido"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("UNAUTHORIZED"));
+
+		String response = auth(get("/api/compras/13002/documentos"), "aprobado@quickbid.demo").andExpect(status().isOk())
 				.andExpect(jsonPath("$.data", hasSize(1)))
-				.andExpect(jsonPath("$.data[0].filename").value("factura-demo.pdf"));
-		auth(get("/api/compras/13002/documentos"), "multa@quickbid.demo").andExpect(status().isForbidden());
+				.andExpect(jsonPath("$.data[0].filename").value("factura-demo.pdf"))
+				.andReturn().getResponse().getContentAsString();
+		assertFalse(response.contains("pendiente-demo.pdf"));
+		assertFalse(response.contains("rechazado-demo.pdf"));
+		assertFalse(response.contains("demo/factura.pdf"));
+		assertFalse(response.contains("storage_path"));
+		assertFalse(response.contains("checksum"));
+		assertFalse(response.contains("password"));
+		assertFalse(response.contains("token"));
+		auth(get("/api/compras/13002/documentos"), "multa@quickbid.demo").andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_OWNED"));
 		auth(get("/api/compras/99999/documentos"), "aprobado@quickbid.demo").andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.data").value(nullValue()))
 				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_FOUND"));
 	}
 

@@ -3,6 +3,7 @@ package com.example.quickbid.quickbid;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -155,12 +156,20 @@ class ConsignmentIntegrationTests {
 
 	@Test void documentacionSolicitadaQuedaPendienteDeRevisionManual() throws Exception {
 		consignments.requestOriginDocuments(16001L, 1002);
-		request(multipart("/api/consignaciones/16001/documentacion-origen")
-				.file(pdf("facturaCompra"))
+		String response = request(multipart("/api/consignaciones/16001/documentacion-origen")
+				.file(pdf("facturaCompra", "..\\secret\\origen.pdf"))
 				.param("observaciones", "Factura demo"), "oro@quickbid.demo")
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.data.estado").value("documentacion_recibida"))
-				.andExpect(jsonPath("$.data.documentosOrigen[0].estado").value("pendiente"));
+				.andExpect(jsonPath("$.data.documentosOrigen[0].estado").value("pendiente"))
+				.andExpect(jsonPath("$.data.documentosOrigen[0].filename").value("origen.pdf"))
+				.andReturn().getResponse().getContentAsString();
+		assertFalse(response.contains(".."));
+		assertFalse(response.contains("secret"));
+		assertFalse(response.contains("storage_path"));
+		assertFalse(response.contains("checksum"));
+		assertFalse(response.contains("password"));
+		assertFalse(response.contains("token"));
 		assertEquals("documentacion_recibida",
 				jdbc.queryForObject("SELECT estado FROM app_solicitudes_consignacion WHERE id=16001", String.class));
 
@@ -175,6 +184,18 @@ class ConsignmentIntegrationTests {
 				.file(new MockMultipartFile("facturaCompra", "origen.pdf", "application/pdf", "contenido falso".getBytes())),
 				"oro@quickbid.demo").andExpect(status().isUnprocessableEntity())
 				.andExpect(jsonPath("$.errors[0].code").value("FILE_TYPE_NOT_SUPPORTED"));
+	}
+
+	@Test void documentacionProtegidaRechazaTokenAusenteOInvalido() throws Exception {
+		mvc.perform(multipart("/api/consignaciones/16001/documentacion-origen").file(pdf("facturaCompra")))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("UNAUTHORIZED"));
+		mvc.perform(multipart("/api/consignaciones/16001/documentacion-origen").file(pdf("facturaCompra"))
+				.header("Authorization", "Bearer token-invalido"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("UNAUTHORIZED"));
 	}
 
 	@Test void documentacionInexistenteAjenaOEstadoInvalidoDevuelveErroresUniformes() throws Exception {
@@ -402,7 +423,11 @@ class ConsignmentIntegrationTests {
 	}
 
 	private MockMultipartFile pdf(String part) {
-		return new MockMultipartFile(part, "origen.pdf", "application/pdf", "%PDF-1.4\nDemo".getBytes());
+		return pdf(part, "origen.pdf");
+	}
+
+	private MockMultipartFile pdf(String part, String filename) {
+		return new MockMultipartFile(part, filename, "application/pdf", "%PDF-1.4\nDemo".getBytes());
 	}
 
 	private void params(org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder builder) {

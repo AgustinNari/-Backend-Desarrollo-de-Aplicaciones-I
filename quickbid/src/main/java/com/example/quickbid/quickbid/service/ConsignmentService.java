@@ -833,7 +833,11 @@ public class ConsignmentService {
 	}
 
 	private String filename(MultipartFile file) {
-		return file.getOriginalFilename() == null ? "archivo" : file.getOriginalFilename();
+		String original = file.getOriginalFilename();
+		if (original == null || original.isBlank()) return "archivo";
+		String normalized = original.replace('\\', '/');
+		String name = normalized.substring(normalized.lastIndexOf('/') + 1).replaceAll("\\p{Cntrl}", "").trim();
+		return name.isBlank() ? "archivo" : name;
 	}
 
 	private String blankToNull(String value) {
