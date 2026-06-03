@@ -1,11 +1,14 @@
 package com.example.quickbid.quickbid;
 
-import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -42,7 +45,42 @@ class SubastaIntegrationTests {
 		mvc.perform(get("/api/subastas")).andExpect(status().isOk())
 				.andExpect(jsonPath("$.data.content", hasSize(4)))
 				.andExpect(jsonPath("$.data.content[?(@.id == 6001)].estadoOperativo", hasItem("abierta")))
-				.andExpect(jsonPath("$.data.content[0].precioBase").doesNotExist());
+				.andExpect(jsonPath("$.data.content[0].precioBase").doesNotExist())
+				.andExpect(jsonPath("$.errors", hasSize(0)));
+	}
+
+	@Test void listadoValidaFiltrosYPaginacionConErroresUniformes() throws Exception {
+		mvc.perform(get("/api/subastas?estado=inexistente")).andExpect(status().isUnprocessableEntity())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_FILTER"));
+		mvc.perform(get("/api/subastas?categoria=inexistente")).andExpect(status().isUnprocessableEntity())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_FILTER"));
+		mvc.perform(get("/api/subastas?moneda=EUR")).andExpect(status().isUnprocessableEntity())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_FILTER"));
+		mvc.perform(get("/api/subastas?fechaDesde=2026-06-10&fechaHasta=2026-06-01"))
+				.andExpect(status().isUnprocessableEntity())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_FILTER"));
+		mvc.perform(get("/api/subastas?page=-1")).andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_PAGE"));
+	}
+
+	@Test void listadoAceptaFiltrosDocumentadosNormalizados() throws Exception {
+		mvc.perform(get("/api/subastas?estado=EN_VIVO&categoria=PLATA&moneda=ars&page=0&size=10"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.content", hasSize(1)))
+				.andExpect(jsonPath("$.data.content[0].id").value(6001))
+				.andExpect(jsonPath("$.errors", hasSize(0)));
+	}
+
+	@Test void listadoConTokenInvalidoDevuelve401Uniforme() throws Exception {
+		mvc.perform(get("/api/subastas").header("Authorization", "Bearer token-invalido"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("UNAUTHORIZED"));
 	}
 
 	@Test void invitadoDetalleNoExponeLive() throws Exception {
@@ -50,18 +88,50 @@ class SubastaIntegrationTests {
 				.andExpect(jsonPath("$.data.autenticado").doesNotExist())
 				.andExpect(jsonPath("$.data.estadoOperativo").value("abierta"))
 				.andExpect(jsonPath("$.data.itemActivoId").doesNotExist())
-				.andExpect(jsonPath("$.data.mejorOfertaActual").doesNotExist());
+				.andExpect(jsonPath("$.data.mejorOfertaActual").doesNotExist())
+				.andExpect(content().string(not(containsString("25100"))));
+	}
+
+	@Test void detalleSubastaInexistenteDevuelve404Uniforme() throws Exception {
+		mvc.perform(get("/api/subastas/99999")).andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_FOUND"));
 	}
 
 	@Test void invitadoCatalogoNoVePrecioBase() throws Exception {
 		mvc.perform(get("/api/subastas/6001/catalogo")).andExpect(status().isOk())
 				.andExpect(jsonPath("$.data.items[0].precioBase").doesNotExist())
-				.andExpect(jsonPath("$.data.items[0].comision").doesNotExist());
+				.andExpect(jsonPath("$.data.items[0].comision").doesNotExist())
+				.andExpect(jsonPath("$.data.items[0].fotoIds").isArray())
+				.andExpect(content().string(not(containsString("medioPago"))))
+				.andExpect(content().string(not(containsString("titular"))));
+	}
+
+	@Test void catalogoDeSubastaInexistenteDevuelve404Uniforme() throws Exception {
+		mvc.perform(get("/api/subastas/99999/catalogo")).andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_FOUND"));
 	}
 
 	@Test void invitadoDetalleItemNoVePrecioBase() throws Exception {
 		mvc.perform(get("/api/items/9001")).andExpect(status().isOk())
-				.andExpect(jsonPath("$.data.precioBase").doesNotExist());
+				.andExpect(jsonPath("$.data.precioBase").doesNotExist())
+				.andExpect(jsonPath("$.data.comision").doesNotExist())
+				.andExpect(jsonPath("$.data.fotoIds").isArray())
+				.andExpect(content().string(not(containsString("mejorOferta"))));
+	}
+
+	@Test void usuarioAutenticadoVePrecioBaseEnDetalleItem() throws Exception {
+		request(get("/api/items/9001"), "aprobado@quickbid.demo").andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.precioBase").value(20000))
+				.andExpect(jsonPath("$.data.comision").value(2000))
+				.andExpect(jsonPath("$.errors", hasSize(0)));
+	}
+
+	@Test void detalleItemInexistenteDevuelve404Uniforme() throws Exception {
+		mvc.perform(get("/api/items/99999")).andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_FOUND"));
 	}
 
 	@Test void usuarioAutenticadoVePrecioBase() throws Exception {

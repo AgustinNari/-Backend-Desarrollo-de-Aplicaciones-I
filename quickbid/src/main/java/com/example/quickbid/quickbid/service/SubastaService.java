@@ -46,6 +46,9 @@ import com.example.quickbid.quickbid.repository.app.NotificacionAppRepository;
 @Service
 public class SubastaService {
 	private static final Set<String> ENROLLMENT_PAYMENT_STATES = Set.of("pendiente_verificacion", "verificado", "vencido");
+	private static final Set<String> AUCTION_STATES = Set.of("programada", "abierta", "en_vivo", "cerrada", "finalizada");
+	private static final Set<String> AUCTION_CATEGORIES = Set.of("comun", "especial", "plata", "oro", "platino");
+	private static final Set<String> CURRENCIES = Set.of("ARS", "USD");
 	private static final String AUCTION_SELECT = """
 			SELECT s.identificador, e.titulo, e.descripcion, s.fecha, s.hora, s.ubicacion,
 			       s.categoria, e.moneda, e.segmento, e.estado_operativo, e.permite_inscripcion_online
@@ -76,11 +79,20 @@ public class SubastaService {
 	public Page<?> list(String estado, String categoria, String moneda, LocalDate fechaDesde, LocalDate fechaHasta,
 			String q, int page, int size, boolean authenticated) {
 		checkPage(page, size);
+		String normalizedState = optionalLower(estado);
+		String normalizedCategory = optionalLower(categoria);
+		String normalizedCurrency = optionalUpper(moneda);
+		checkFilter("estado", normalizedState, AUCTION_STATES);
+		checkFilter("categoria", normalizedCategory, AUCTION_CATEGORIES);
+		checkFilter("moneda", normalizedCurrency, CURRENCIES);
+		if (fechaDesde != null && fechaHasta != null && fechaDesde.isAfter(fechaHasta)) {
+			throw unprocessable("Rango de fechas invalido", "INVALID_FILTER");
+		}
 		StringBuilder where = new StringBuilder(" WHERE 1=1");
 		List<Object> args = new ArrayList<>();
-		filter(where, args, "e.estado_operativo", estado);
-		filter(where, args, "s.categoria", categoria);
-		filter(where, args, "e.moneda", moneda == null ? null : moneda.toUpperCase(Locale.ROOT));
+		filter(where, args, "e.estado_operativo", normalizedState);
+		filter(where, args, "s.categoria", normalizedCategory);
+		filter(where, args, "e.moneda", normalizedCurrency);
 		if (fechaDesde != null) { where.append(" AND s.fecha>=?"); args.add(fechaDesde); }
 		if (fechaHasta != null) { where.append(" AND s.fecha<=?"); args.add(fechaHasta); }
 		if (q != null && !q.isBlank()) { where.append(" AND LOWER(e.titulo) LIKE ?"); args.add("%" + q.toLowerCase(Locale.ROOT) + "%"); }
@@ -330,6 +342,20 @@ public class SubastaService {
 
 	private void filter(StringBuilder where, List<Object> args, String field, String value) {
 		if (value != null && !value.isBlank()) { where.append(" AND ").append(field).append("=?"); args.add(value); }
+	}
+
+	private String optionalLower(String value) {
+		return value == null || value.isBlank() ? null : value.trim().toLowerCase(Locale.ROOT);
+	}
+
+	private String optionalUpper(String value) {
+		return value == null || value.isBlank() ? null : value.trim().toUpperCase(Locale.ROOT);
+	}
+
+	private void checkFilter(String field, String value, Set<String> allowed) {
+		if (value != null && !allowed.contains(value)) {
+			throw unprocessable("Filtro " + field + " invalido", "INVALID_FILTER");
+		}
 	}
 
 	private void checkPage(int page, int size) {
