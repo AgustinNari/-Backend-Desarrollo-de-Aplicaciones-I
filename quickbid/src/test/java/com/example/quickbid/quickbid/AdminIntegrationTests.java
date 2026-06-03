@@ -3,6 +3,8 @@ package com.example.quickbid.quickbid;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.blankOrNullString;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -10,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -60,16 +63,37 @@ class AdminIntegrationTests {
 
 	@Test void adminSinCredencialEs401YUsuarioNormalEs403() throws Exception {
 		mvc.perform(get("/api/admin/consignaciones")).andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("UNAUTHORIZED"));
+		mvc.perform(get("/api/admin/consignaciones").header("Authorization", "Bearer token-invalido"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.data").value(nullValue()))
 				.andExpect(jsonPath("$.errors[0].code").value("UNAUTHORIZED"));
 		mvc.perform(get("/api/admin/consignaciones").header("Authorization", "Bearer " + token("aprobado@quickbid.demo")))
-				.andExpect(status().isForbidden()).andExpect(jsonPath("$.errors[0].code").value("FORBIDDEN"));
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("FORBIDDEN"));
+	}
+
+	@Test void adminErroresBasicosSonEnvelopeUniforme() throws Exception {
+		admin(get("/api/admin/solicitudes-registro/99999")).andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_FOUND"));
+		admin(post("/api/admin/medios-pago/5003/rechazar").contentType(MediaType.APPLICATION_JSON)
+				.content("{}")).andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_FIELD"));
 	}
 
 	@Test void adminApruebaRegistroYGuardaSetupTokenHasheado() throws Exception {
 		long id = registration("aprobar@quickbid.demo");
 		admin(post("/api/admin/solicitudes-registro/" + id + "/aprobar").contentType(MediaType.APPLICATION_JSON)
 				.content("{\"documento\":\"DNI-ADMIN-001\",\"categoriaInicial\":\"especial\"}")).andExpect(status().isOk())
-				.andExpect(jsonPath("$.data.estado").value("aprobada_pendiente_finalizacion"));
+				.andExpect(jsonPath("$.data.estado").value("aprobada_pendiente_finalizacion"))
+				.andExpect(content().string(not(containsString("setup_token"))))
+				.andExpect(content().string(not(containsString("password"))))
+				.andExpect(content().string(not(containsString("refreshToken"))))
+				.andExpect(content().string(not(containsString("hash"))));
 		String hash = jdbc.queryForObject("SELECT setup_token_hash FROM app_solicitudes_registro WHERE id=?", String.class, id);
 		assertNotNull(hash);
 		assertEquals(64, hash.length());
@@ -102,6 +126,15 @@ class AdminIntegrationTests {
 	}
 
 	@Test void adminVerificaYRechazaMediosPendientes() throws Exception {
+		admin(get("/api/admin/medios-pago?estado=VERIFICADO")).andExpect(status().isOk())
+				.andExpect(jsonPath("$.errors", hasSize(0)))
+				.andExpect(content().string(not(containsString("hash_identificador"))))
+				.andExpect(content().string(not(containsString("titular"))))
+				.andExpect(content().string(not(containsString("password"))));
+		admin(get("/api/admin/medios-pago?estado=inexistente")).andExpect(status().isUnprocessableEntity())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_FILTER"));
+
 		int before = jdbc.queryForObject("SELECT puntos FROM app_cuentas WHERE id=3001", Integer.class);
 		admin(post("/api/admin/medios-pago/5003/verificar")).andExpect(status().isOk())
 				.andExpect(jsonPath("$.data.estado").value("verificado"));

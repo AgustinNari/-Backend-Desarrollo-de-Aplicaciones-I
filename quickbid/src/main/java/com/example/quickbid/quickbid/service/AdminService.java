@@ -43,6 +43,7 @@ import com.example.quickbid.quickbid.service.PurchaseService.PaymentOutcome;
 @Service
 public class AdminService {
 	private static final Set<String> CATEGORIES = Set.of("comun", "especial", "plata", "oro", "platino");
+	private static final Set<String> PAYMENT_METHOD_STATES = Set.of("pendiente_verificacion", "verificado", "rechazado", "eliminado");
 	private final JdbcTemplate jdbc;
 	private final SolicitudRegistroRepository registrations;
 	private final RegistrationApprovalService registrationApproval;
@@ -138,7 +139,11 @@ public class AdminService {
 
 	@Transactional(readOnly = true)
 	public List<PaymentMethod> paymentMethods(String state) {
-		return queries.findPaymentMethods(state);
+		String normalizedState = optionalLower(state);
+		if (normalizedState != null && !PAYMENT_METHOD_STATES.contains(normalizedState)) {
+			throw unprocessable("Estado de medio de pago invalido", "INVALID_FILTER");
+		}
+		return queries.findPaymentMethods(normalizedState);
 	}
 
 	public MedioPagoResponse verifyPaymentMethod(Long id, Integer employeeId) {
@@ -323,6 +328,10 @@ public class AdminService {
 		}
 	}
 
+	private String optionalLower(String value) {
+		return value == null || value.isBlank() ? null : value.trim().toLowerCase();
+	}
+
 	private CuentaApp account(Long id) { return accounts.findById(id).orElseThrow(() -> notFound("Cuenta inexistente")); }
 	private AdminDtos.Registration registration(com.example.quickbid.quickbid.entity.app.SolicitudRegistro value) { return new AdminDtos.Registration(value.getId(), value.getEmail(), value.getNombre(), value.getApellido(), value.getEstado(), value.getMotivoRechazo(), value.getPersonaId(), value.getClienteId()); }
 	private Account account(CuentaApp value) { return new Account(value.getId(), value.getEmail(), value.getEstado(), value.getPuntos(), value.getCategoriaCalculada()); }
@@ -341,6 +350,7 @@ public class AdminService {
 	private BusinessException bad(String message, String code) { return new BusinessException(HttpStatus.BAD_REQUEST, message, code); }
 	private BusinessException forbidden(String message, String code) { return new BusinessException(HttpStatus.FORBIDDEN, message, code); }
 	private BusinessException conflict(String message, String code) { return new BusinessException(HttpStatus.CONFLICT, message, code); }
+	private BusinessException unprocessable(String message, String code) { return new BusinessException(HttpStatus.UNPROCESSABLE_ENTITY, message, code); }
 	private BusinessException notFound(String message) { return new BusinessException(HttpStatus.NOT_FOUND, message, "RESOURCE_NOT_FOUND"); }
 
 	@FunctionalInterface
