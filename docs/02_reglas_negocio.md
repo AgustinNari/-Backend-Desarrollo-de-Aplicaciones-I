@@ -97,6 +97,8 @@ Ejemplo base para subastas comun, especial o plata:
 - mínima normal 15.100;
 - máxima normal 17.000.
 
+- Un usuario puede pujar sin inscripción previa, siempre que cumpla las reglas de cuenta, categoría, medio de pago, moneda y estado de subasta, entre otros. Sin embargo, no puede pujar por un bien consignado por él mismo.
+
 ## Concurrencia de pujas
 
 - Al enviar una puja, bloquear/controlar transaccionalmente el estado del lote/subasta.
