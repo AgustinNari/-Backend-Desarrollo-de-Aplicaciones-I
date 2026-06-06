@@ -80,7 +80,7 @@ Estados:
 | Pujar con validaciones | completo | Límites, fondos, moneda, categoría e idempotencia |
 | Puntos y reserva de pujas | parcial | +1 por puja aceptada, +80 al ganar, reserva/liberación/consumo de límite y disponibilidad con reservas cubiertos por tests; el cierre automático queda disponible como procesador admin testeable, sin scheduler background productivo |
 | Concurrencia protegida | completo | Lock transaccional y tests simultáneos |
-| WebSocket/eventos | completo | Autorizacion inbound por topic, filtro outbound por estado actual, colas privadas, heartbeat y presencia con TTL |
+| WebSocket/eventos | completo | Handshake `/ws` publico como transporte; JWT obligatorio en STOMP `CONNECT`; autorizacion inbound por topic, filtro outbound por estado actual, colas privadas, heartbeat y presencia con TTL |
 | Cierre de lote y compra | completo | Transaccional e idempotente |
 | Compra interna empresa si nadie puja | completo | Modelada en `app_compras` |
 

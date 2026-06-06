@@ -62,13 +62,18 @@ public class WebSocketAuthChannelInterceptor implements ChannelInterceptor {
 	}
 
 	private void authorizeSubscription(StompHeaderAccessor accessor) {
-		if (accessor.getUser() == null) {
-			throw new MessagingException("Autenticacion requerida para suscribirse");
-		}
+		Long accountId;
 		try {
-			subscriptions.authorize(Long.valueOf(accessor.getUser().getName()), accessor.getDestination());
+			if (accessor.getUser() != null) {
+				accountId = Long.valueOf(accessor.getUser().getName());
+			} else {
+				accountId = connections.accountId(accessor.getSessionId())
+						.orElseThrow(() -> new MessagingException("Autenticacion requerida para suscribirse"));
+				accessor.setUser(new UsernamePasswordAuthenticationToken(accountId, null, List.of()));
+			}
 		} catch (NumberFormatException exception) {
 			throw new MessagingException("Principal STOMP invalido");
 		}
+		subscriptions.authorize(accountId, accessor.getDestination());
 	}
 }

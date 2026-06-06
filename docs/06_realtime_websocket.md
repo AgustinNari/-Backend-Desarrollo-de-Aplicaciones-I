@@ -75,7 +75,11 @@ Privado:
 
 - Nunca enviar precios/montos a invitados.
 - Solo usuarios registrados/aprobados pueden suscribirse a canales live con montos.
-- Cada `CONNECT` exige Bearer JWT valido y cada `SUBSCRIBE` revalida cuenta,
+- El handshake `/ws` puede abrir el transporte sin JWT HTTP; la sesion todavia
+  no queda autenticada ni puede suscribirse.
+- Cada `CONNECT` exige `Authorization: Bearer <accessToken>` como header nativo
+  STOMP, compatible con `connectHeaders` de `@stomp/stompjs`.
+- Cada `SUBSCRIBE` revalida cuenta,
   destino, existencia de subasta y pertenencia del item si corresponde.
 - Antes de entregar cada evento live o privado, revalidar el estado actual de
   la cuenta asociada a la sesion para cortar bloqueos posteriores al subscribe.

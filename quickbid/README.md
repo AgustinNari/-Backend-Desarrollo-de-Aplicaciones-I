@@ -361,6 +361,18 @@ El endpoint STOMP es `/ws`. El frame `CONNECT` debe incluir
 `Authorization: Bearer <accessToken>`. Los invitados no pueden conectarse ni
 suscribirse a topics live con importes.
 
+El handshake WebSocket abre el transporte sin exigir JWT HTTP. En navegador o
+React Native con `@stomp/stompjs`, enviar el token mediante
+`connectHeaders.Authorization`; esos headers pertenecen al frame STOMP
+`CONNECT`, no al handshake HTTP:
+
+```javascript
+const client = new Client({
+  brokerURL: "ws://localhost:8080/ws",
+  connectHeaders: { Authorization: `Bearer ${accessToken}` }
+});
+```
+
 ```text
 /topic/subastas/{id}/estado
 /topic/subastas/{id}/items/{itemCatalogoId}/pujas
@@ -368,7 +380,9 @@ suscribirse a topics live con importes.
 /user/queue/pujas
 ```
 
-`CONNECT` exige Bearer JWT valido. Cada `SUBSCRIBE` vuelve a validar que la
+Un header HTTP `Authorization` valido sigue siendo aceptado durante el
+handshake para herramientas que lo soportan, pero no reemplaza el Bearer del
+frame STOMP `CONNECT`. Cada `SUBSCRIBE` vuelve a validar que la
 cuenta exista y pueda navegar. Los topics de subasta validan ademas que exista
 la subasta y, para `/items/{itemCatalogoId}/pujas`, que el item pertenezca a
 ella. Solo se aceptan los destinos documentados: una cola privada ajena o un
