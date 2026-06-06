@@ -1,16 +1,9 @@
 # -----------------------------------------------------------------------------
-# QuickBid - variables comunes para REST Client
+# QuickBid - 00 smoke readonly / seguro para ejecutar muchas veces
 # -----------------------------------------------------------------------------
-# Levantar backend antes de usar:
-#   $env:SPRING_PROFILES_ACTIVE="dev"
-#   $env:DB_URL="jdbc:postgresql://localhost:5432/baseQuickbid"
-#   $env:DB_USERNAME="postgres"
-#   $env:DB_PASSWORD="TU_PASSWORD_POSTGRES"
-#   $env:APP_JWT_SECRET="quickbid-secret-local-de-prueba-super-largo-123456"
-#   $env:APP_ADMIN_ENABLED="true"
-#   $env:APP_ADMIN_INTERNAL_KEY="test-admin-key"
-#   $env:APP_MAIL_ENABLED="false"
-#   .\mvnw.cmd spring-boot:run
+# Requiere backend levantado con APP_ADMIN_ENABLED=true y
+# APP_ADMIN_INTERNAL_KEY=test-admin-key.
+# No modifica datos salvo login/refresh/recuperación.
 # -----------------------------------------------------------------------------
 
 @baseUrl = http://localhost:8080
@@ -20,32 +13,22 @@
 @cuentaMultaId = 3002
 @cuentaConsignadorId = 3004
 @medioPagoAprobadoArsId = 5001
-@medioPagoPendienteChequeId = 5003
 @medioPagoMultaArsId = 5004
 @medioPagoConsignadorArsId = 5005
 @subastaEnVivoId = 6001
 @subastaEspecialUsdId = 6002
 @subastaCerradaId = 6003
-@subastaPublicableId = 6004
-@catalogoPublicableId = 7004
 @itemActivoId = 9001
-@itemPublicadoId = 9002
 @compraMultaId = 13001
 @compraPagosExtraId = 13002
-@multaId = 14001
 @consignacionPendienteId = 16001
-@consignacionDocumentacionId = 16002
-@consignacionFisicaId = 16003
-@consignacionAcuerdoId = 16004
-@consignacionPublicableId = 16008
-@consignacionDevolucionId = 16006
+@consignacionLiquidadaId = 16007
 
 @accessAprobado = {{loginAprobado.response.body.$.data.accessToken}}
 @refreshAprobado = {{loginAprobado.response.body.$.data.refreshToken}}
 @accessConsignador = {{loginConsignador.response.body.$.data.accessToken}}
-@refreshConsignador = {{loginConsignador.response.body.$.data.refreshToken}}
 @accessMulta = {{loginMulta.response.body.$.data.accessToken}}
-@refreshMulta = {{loginMulta.response.body.$.data.refreshToken}}
+@accessBloqueado = {{loginBloqueado.response.body.$.data.accessToken}}
 
 ### 00 - Health
 GET {{baseUrl}}/actuator/health
@@ -80,7 +63,8 @@ Content-Type: application/json
   "clave": "Demo123!"
 }
 
-### 04 - Auth - Login usuario bloqueado debe devolver 403
+### 04 - Auth - Login usuario bloqueado: ahora es login limitado, no 403
+# @name loginBloqueado
 POST {{baseUrl}}/api/auth/login
 Content-Type: application/json
 
@@ -89,16 +73,16 @@ Content-Type: application/json
   "clave": "Demo123!"
 }
 
-# -----------------------------------------------------------------------------
-# ESCENARIO 00: lectura segura / smoke test. Se puede ejecutar muchas veces.
-# No modifica datos salvo login/refresh/recuperación.
-# -----------------------------------------------------------------------------
-
-### 05 - Auth - Sesion actual
+### 05 - Auth - Sesion actual aprobado
 GET {{baseUrl}}/api/auth/sesion
 Authorization: Bearer {{accessAprobado}}
 
-### 06 - Auth - Refresh usuario aprobado
+### 06 - Auth - Endpoint normal con bloqueado debe quedar bloqueado
+# Esperado: 403 ACCOUNT_BLOCKED, aunque el login limitado haya devuelto token.
+GET {{baseUrl}}/api/usuario/perfil
+Authorization: Bearer {{accessBloqueado}}
+
+### 07 - Auth - Refresh usuario aprobado
 POST {{baseUrl}}/api/auth/refresh
 Content-Type: application/json
 
@@ -106,7 +90,7 @@ Content-Type: application/json
   "refreshToken": "{{refreshAprobado}}"
 }
 
-### 07 - Auth - Solicitar recuperacion de clave
+### 08 - Auth - Solicitar recuperacion de clave
 POST {{baseUrl}}/api/auth/recuperar-clave
 Content-Type: application/json
 
@@ -114,74 +98,106 @@ Content-Type: application/json
   "email": "aprobado@quickbid.demo"
 }
 
-### 08 - Usuario - Perfil aprobado
+### 09 - Usuario - Perfil aprobado
 GET {{baseUrl}}/api/usuario/perfil
 Authorization: Bearer {{accessAprobado}}
 
-### 09 - Usuario - Estadisticas
-GET {{baseUrl}}/api/usuario/estadisticas
+### 10 - Usuario - Estadisticas total
+GET {{baseUrl}}/api/usuario/estadisticas?periodo=total
 Authorization: Bearer {{accessAprobado}}
 
-### 10 - Usuario - Historial
+### 11 - Usuario - Estadisticas mes
+GET {{baseUrl}}/api/usuario/estadisticas?periodo=mes
+Authorization: Bearer {{accessAprobado}}
+
+### 12 - Usuario - Historial paginado
 GET {{baseUrl}}/api/usuario/historial?page=0&size=20
 Authorization: Bearer {{accessAprobado}}
 
-### 11 - Usuario - Notificaciones no leidas
+### 13 - Usuario - Notificaciones no leidas
 GET {{baseUrl}}/api/usuario/notificaciones?leida=false&page=0&size=20
 Authorization: Bearer {{accessAprobado}}
 
-### 12 - Medios de pago - listar propios aprobado
+### 14 - Usuario - Notificaciones por categoria/tipo
+GET {{baseUrl}}/api/usuario/notificaciones?categoria=subasta&page=0&size=20
+Authorization: Bearer {{accessAprobado}}
+
+### 15 - Usuario - Direcciones multiples
+GET {{baseUrl}}/api/usuario/direcciones-envio
+Authorization: Bearer {{accessAprobado}}
+
+### 16 - Usuario - Direccion legacy compatible
+GET {{baseUrl}}/api/usuario/direccion-envio
+Authorization: Bearer {{accessAprobado}}
+
+### 17 - Medios de pago - listar propios aprobado
 GET {{baseUrl}}/api/usuario/medios-pago
 Authorization: Bearer {{accessAprobado}}
 
-### 13 - Subastas - Listado invitado sin precios
+### 18 - Subastas - Listado invitado sin precios
 GET {{baseUrl}}/api/subastas
 
-### 14 - Subastas - Detalle invitado
+### 19 - Subastas - Detalle invitado
 GET {{baseUrl}}/api/subastas/{{subastaEnVivoId}}
 
-### 15 - Subastas - Catalogo invitado sin precios
+### 20 - Subastas - Catalogo invitado sin precios/live
 GET {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/catalogo
 
-### 16 - Subastas - Catalogo autenticado con precios
+### 21 - Subastas - Catalogo autenticado con precios
 GET {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/catalogo
 Authorization: Bearer {{accessAprobado}}
 
-### 17 - Subastas - Detalle item autenticado
+### 22 - Items - Detalle autenticado
 GET {{baseUrl}}/api/items/{{itemActivoId}}
 Authorization: Bearer {{accessAprobado}}
 
-### 18 - Subastas - Verificacion aprobado en subasta live
+### 23 - Subastas - Verificacion aprobado en subasta live
 POST {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/verificacion
 Authorization: Bearer {{accessAprobado}}
 
-### 19 - Subastas - Puja actual aprobado
+### 24 - Subastas - Puja actual aprobado
 GET {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/puja-actual
 Authorization: Bearer {{accessAprobado}}
 
-### 20 - Subastas - Verificacion multa: puede mirar, no puede pujar
+### 25 - Subastas - Verificacion multa: puede mirar, no pujar
 POST {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/verificacion
 Authorization: Bearer {{accessMulta}}
 
-### 21 - Compras - Listar propias aprobado
+### 26 - Compras - Listar propias aprobado
 GET {{baseUrl}}/api/compras?page=0&size=20
 Authorization: Bearer {{accessAprobado}}
 
-### 22 - Compras - Detalle compra seed con pagos extra pendientes
+### 27 - Compras - Filtrar por pagos_extra_pendientes
+GET {{baseUrl}}/api/compras?page=0&size=20&estado=pagos_extra_pendientes
+Authorization: Bearer {{accessAprobado}}
+
+### 28 - Compras - Detalle compra seed
 GET {{baseUrl}}/api/compras/{{compraPagosExtraId}}
 Authorization: Bearer {{accessAprobado}}
 
-### 23 - Consignacion - Requisitos consignador
+### 29 - Compras - Documentos compra seed
+GET {{baseUrl}}/api/compras/{{compraPagosExtraId}}/documentos
+Authorization: Bearer {{accessAprobado}}
+
+### 30 - Consignacion - Requisitos consignador
 GET {{baseUrl}}/api/consignaciones/requisitos
 Authorization: Bearer {{accessConsignador}}
 
-### 24 - Consignacion - Listar propias consignador
+### 31 - Consignacion - Listar propias consignador
 GET {{baseUrl}}/api/consignaciones?page=0&size=20
 Authorization: Bearer {{accessConsignador}}
 
-### 25 - Admin - Sin key debe devolver 401
+### 32 - Consignacion - Filtro activas
+GET {{baseUrl}}/api/consignaciones?filtro=activas&page=0&size=20
+Authorization: Bearer {{accessConsignador}}
+
+### 33 - Consignacion - Filtro vendidas
+GET {{baseUrl}}/api/consignaciones?filtro=vendidas&page=0&size=20
+Authorization: Bearer {{accessConsignador}}
+
+### 34 - Admin - Sin key debe fallar
 GET {{baseUrl}}/api/admin/consignaciones
 
-### 26 - Admin - Con key debe devolver 200
+### 35 - Admin - Con key debe devolver 200
 GET {{baseUrl}}/api/admin/consignaciones
 X-QuickBid-Admin-Key: {{adminKey}}

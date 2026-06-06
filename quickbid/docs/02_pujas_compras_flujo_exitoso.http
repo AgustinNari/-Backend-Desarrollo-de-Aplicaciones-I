@@ -1,108 +1,58 @@
 # -----------------------------------------------------------------------------
-# QuickBid - variables comunes para REST Client
+# QuickBid - 02 pujas + cierre de lote + compra/pago extras
 # -----------------------------------------------------------------------------
-# Levantar backend antes de usar:
-#   $env:SPRING_PROFILES_ACTIVE="dev"
-#   $env:DB_URL="jdbc:postgresql://localhost:5432/baseQuickbid"
-#   $env:DB_USERNAME="postgres"
-#   $env:DB_PASSWORD="TU_PASSWORD_POSTGRES"
-#   $env:APP_JWT_SECRET="quickbid-secret-local-de-prueba-super-largo-123456"
-#   $env:APP_ADMIN_ENABLED="true"
-#   $env:APP_ADMIN_INTERNAL_KEY="test-admin-key"
-#   $env:APP_MAIL_ENABLED="false"
-#   .\mvnw.cmd spring-boot:run
+# Ejecutar sobre base limpia. No repetir sin resetear: cierra lote 6001.
 # -----------------------------------------------------------------------------
 
 @baseUrl = http://localhost:8080
 @adminKey = test-admin-key
 
-@cuentaAprobadaId = 3001
-@cuentaMultaId = 3002
-@cuentaConsignadorId = 3004
-@medioPagoAprobadoArsId = 5001
-@medioPagoPendienteChequeId = 5003
-@medioPagoMultaArsId = 5004
-@medioPagoConsignadorArsId = 5005
 @subastaEnVivoId = 6001
-@subastaEspecialUsdId = 6002
-@subastaCerradaId = 6003
-@subastaPublicableId = 6004
-@catalogoPublicableId = 7004
 @itemActivoId = 9001
-@itemPublicadoId = 9002
-@compraMultaId = 13001
+@medioPagoConsignadorArsId = 5005
+@medioPagoMultaArsId = 5004
 @compraPagosExtraId = 13002
-@multaId = 14001
-@consignacionPendienteId = 16001
-@consignacionDocumentacionId = 16002
-@consignacionFisicaId = 16003
-@consignacionAcuerdoId = 16004
-@consignacionPublicableId = 16008
-@consignacionDevolucionId = 16006
+@medioPagoAprobadoArsId = 5001
+@direccionEnvioAprobadoId = 5101
 
 @accessAprobado = {{loginAprobado.response.body.$.data.accessToken}}
-@refreshAprobado = {{loginAprobado.response.body.$.data.refreshToken}}
 @accessConsignador = {{loginConsignador.response.body.$.data.accessToken}}
-@refreshConsignador = {{loginConsignador.response.body.$.data.refreshToken}}
 @accessMulta = {{loginMulta.response.body.$.data.accessToken}}
-@refreshMulta = {{loginMulta.response.body.$.data.refreshToken}}
+@newPurchaseId = {{cerrarLote6001.response.body.$.data.id}}
 
 ### 00 - Health
 GET {{baseUrl}}/actuator/health
 
-### 01 - Auth - Login usuario aprobado
+### 01 - Login aprobado
 # @name loginAprobado
 POST {{baseUrl}}/api/auth/login
 Content-Type: application/json
 
-{
-  "email": "aprobado@quickbid.demo",
-  "clave": "Demo123!"
-}
+{ "email": "aprobado@quickbid.demo", "clave": "Demo123!" }
 
-### 02 - Auth - Login usuario consignador
+### 02 - Login consignador
 # @name loginConsignador
 POST {{baseUrl}}/api/auth/login
 Content-Type: application/json
 
-{
-  "email": "consignador@quickbid.demo",
-  "clave": "Demo123!"
-}
+{ "email": "consignador@quickbid.demo", "clave": "Demo123!" }
 
-### 03 - Auth - Login usuario con restriccion por multa
+### 03 - Login multa
 # @name loginMulta
 POST {{baseUrl}}/api/auth/login
 Content-Type: application/json
 
-{
-  "email": "multa@quickbid.demo",
-  "clave": "Demo123!"
-}
+{ "email": "multa@quickbid.demo", "clave": "Demo123!" }
 
-### 04 - Auth - Login usuario bloqueado debe devolver 403
-POST {{baseUrl}}/api/auth/login
-Content-Type: application/json
-
-{
-  "email": "bloqueado@quickbid.demo",
-  "clave": "Demo123!"
-}
-
-# -----------------------------------------------------------------------------
-# ESCENARIO 02: puja + cierre de lote + compra/pago extras.
-# Ejecutar sobre base limpia. No repetir sin resetear, porque cierra lote 6001.
-# -----------------------------------------------------------------------------
-
-### 05 - Verificacion aprobado en subasta live
+### 04 - Verificacion aprobado en subasta live
 POST {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/verificacion
 Authorization: Bearer {{accessAprobado}}
 
-### 06 - Puja actual antes de pujar
+### 05 - Puja actual antes de pujar
 GET {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/puja-actual
 Authorization: Bearer {{accessAprobado}}
 
-### 07 - Consignador puja sin inscripcion previa obligatoria
+### 06 - Puja aceptada con idempotencyKey obligatorio
 # @name pujaConsignador
 POST {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/pujar
 Authorization: Bearer {{accessConsignador}}
@@ -113,10 +63,35 @@ Content-Type: application/json
   "monto": 25300,
   "medioPagoId": {{medioPagoConsignadorArsId}},
   "clientStateVersion": 1,
-  "idempotencyKey": "manual-puja-consignador-{{$timestamp}}"
+  "idempotencyKey": "manual-puja-consignador-001"
 }
 
-### 08 - Usuario con multa no puede pujar
+### 07 - Repetir misma puja: debe ser idempotente, no duplicar
+POST {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/pujar
+Authorization: Bearer {{accessConsignador}}
+Content-Type: application/json
+
+{
+  "itemCatalogoId": {{itemActivoId}},
+  "monto": 25300,
+  "medioPagoId": {{medioPagoConsignadorArsId}},
+  "clientStateVersion": 1,
+  "idempotencyKey": "manual-puja-consignador-001"
+}
+
+### 08 - Puja sin idempotencyKey debe fallar por validacion
+POST {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/pujar
+Authorization: Bearer {{accessAprobado}}
+Content-Type: application/json
+
+{
+  "itemCatalogoId": {{itemActivoId}},
+  "monto": 26000,
+  "medioPagoId": {{medioPagoAprobadoArsId}},
+  "clientStateVersion": 1
+}
+
+### 09 - Usuario con multa no puede pujar
 POST {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/pujar
 Authorization: Bearer {{accessMulta}}
 Content-Type: application/json
@@ -126,41 +101,50 @@ Content-Type: application/json
   "monto": 26000,
   "medioPagoId": {{medioPagoMultaArsId}},
   "clientStateVersion": 1,
-  "idempotencyKey": "manual-puja-multa-{{$timestamp}}"
+  "idempotencyKey": "manual-puja-multa-001"
 }
 
-### 09 - Admin - Cerrar lote con pago automatico exitoso
+### 10 - Admin - Cerrar lote con pago automatico exitoso
 # @name cerrarLote6001
 POST {{baseUrl}}/api/admin/subastas/{{subastaEnVivoId}}/cerrar-lote?resultado=SUCCESS
 X-QuickBid-Admin-Key: {{adminKey}}
 
-### 10 - Compras - Listar propias consignador
+### 11 - Admin - Procesar timers de subasta, si hubiera vencidos
+POST {{baseUrl}}/api/admin/subastas/timers/procesar
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### 12 - Compras - Detalle compra generada por cierre de lote
+GET {{baseUrl}}/api/compras/{{newPurchaseId}}
+Authorization: Bearer {{accessConsignador}}
+
+### 13 - Compras - Listar propias consignador
 GET {{baseUrl}}/api/compras?page=0&size=20
 Authorization: Bearer {{accessConsignador}}
 
-### 11 - Compras - Listar propias aprobado
-GET {{baseUrl}}/api/compras?page=0&size=20
+### 14 - Compras - Filtrar compras aprobado por estado
+GET {{baseUrl}}/api/compras?page=0&size=20&estado=pagos_extra_pendientes
 Authorization: Bearer {{accessAprobado}}
 
-### 12 - Compras - Detalle compra seed con pagos extra pendientes
-GET {{baseUrl}}/api/compras/{{compraPagosExtraId}}
-Authorization: Bearer {{accessAprobado}}
-
-### 13 - Compras - Configurar retiro
+### 15 - Seed compra 13002 - Configurar envio con direccion congelada
 PUT {{baseUrl}}/api/compras/{{compraPagosExtraId}}/entrega
 Authorization: Bearer {{accessAprobado}}
 Content-Type: application/json
 
 {
-  "tipo": "retiro"
+  "tipo": "envio",
+  "direccionEnvioId": {{direccionEnvioAprobadoId}}
 }
 
-### 14 - Compras - Pagar extras
+### 16 - Seed compra 13002 - Pagar extras
 POST {{baseUrl}}/api/compras/{{compraPagosExtraId}}/pagar
 Authorization: Bearer {{accessAprobado}}
 Content-Type: application/json
 
 {
   "medioPagoId": {{medioPagoAprobadoArsId}},
-  "idempotencyKey": "manual-extras-{{$timestamp}}"
+  "idempotencyKey": "manual-extras-001"
 }
+
+### 17 - Seed compra 13002 - Documentos luego de pagar extras
+GET {{baseUrl}}/api/compras/{{compraPagosExtraId}}/documentos
+Authorization: Bearer {{accessAprobado}}

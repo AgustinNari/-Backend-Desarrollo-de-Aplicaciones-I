@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>QuickBid WebSocket Test</title>
+  <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.0.0/bundles/stomp.umd.min.js"></script>
+</head>
+<body>
+  <h1>QuickBid WebSocket Test</h1>
+
+  <p>Access Token, sin escribir Bearer:</p>
+  <textarea id="token" rows="5" cols="130"></textarea>
+  <br /><br />
+
+  <button onclick="connect()">1. Conectar</button>
+  <button onclick="subscribeTopics()">2. Suscribirse</button>
+  <button onclick="disconnect()">Desconectar</button>
+  <button onclick="clearLog()">Limpiar logs</button>
+
+  <h2>Estado</h2>
+  <pre id="status" style="background:#222;color:#fff;padding:10px;">Desconectado</pre>
+
+  <h2>Logs</h2>
+  <pre id="log" style="background:#111;color:#0f0;padding:12px;white-space:pre-wrap;min-height:400px;"></pre>
+
+  <script>
+    let client = null;
+
+    function log(message, data) {
+      const el = document.getElementById("log");
+      const time = new Date().toLocaleTimeString();
+      const text = data !== undefined
+        ? `[${time}] ${message}\n${typeof data === "string" ? data : JSON.stringify(data, null, 2)}\n\n`
+        : `[${time}] ${message}\n\n`;
+      el.textContent += text;
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function setStatus(text) {
+      document.getElementById("status").textContent = text;
+    }
+
+    function connect() {
+      const token = document.getElementById("token").value.trim();
+
+      if (!token) {
+        alert("Pegá primero el accessToken");
+        return;
+      }
+
+      client = new StompJs.Client({
+        brokerURL: "ws://localhost:8080/ws",
+        connectHeaders: {
+          Authorization: "Bearer " + token
+        },
+        debug: function (str) {
+          log("[DEBUG]", str);
+        },
+        reconnectDelay: 0,
+        onConnect: function (frame) {
+          setStatus("CONECTADO STOMP");
+          log("CONECTADO STOMP", frame.headers);
+        },
+        onStompError: function (frame) {
+          setStatus("ERROR STOMP");
+          log("ERROR STOMP", {
+            headers: frame.headers,
+            body: frame.body
+          });
+        },
+        onWebSocketError: function (event) {
+          setStatus("ERROR WEBSOCKET");
+          log("ERROR WEBSOCKET", String(event));
+        },
+        onWebSocketClose: function (event) {
+          setStatus("WEBSOCKET CERRADO");
+          log("WEBSOCKET CERRADO", {
+            code: event.code,
+            reason: event.reason
+          });
+        }
+      });
+
+      client.activate();
+    }
+
+    function subscribeTopics() {
+      if (!client || !client.connected) {
+        alert("Primero tenés que conectar y esperar CONECTADO STOMP");
+        return;
+      }
+
+      subscribe("/topic/subastas/6001/estado", "SUBASTA 6001 ESTADO");
+      subscribe("/topic/subastas/6001/items/9001/pujas", "SUBASTA 6001 ITEM 9001 PUJAS");
+      subscribe("/user/queue/notificaciones", "NOTIFICACIONES PRIVADAS");
+      subscribe("/user/queue/pujas", "PUJAS PRIVADAS");
+
+      log("SUSCRIPCIONES REGISTRADAS");
+    }
+
+    function subscribe(destination, label) {
+      client.subscribe(destination, function (message) {
+        log("EVENTO " + label + " desde " + destination, parseBody(message.body));
+      });
+      log("Suscripto a " + destination);
+    }
+
+    function parseBody(body) {
+      try {
+        return JSON.parse(body);
+      } catch (e) {
+        return body;
+      }
+    }
+
+    function disconnect() {
+      if (client) {
+        client.deactivate();
+        setStatus("DESCONECTADO MANUALMENTE");
+        log("Desconectado manualmente");
+      }
+    }
+
+    function clearLog() {
+      document.getElementById("log").textContent = "";
+    }
+  </script>
+</body>
+</html>
