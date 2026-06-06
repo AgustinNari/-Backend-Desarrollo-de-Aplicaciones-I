@@ -15,8 +15,8 @@ curl.exe -X POST http://localhost:8080/api/auth/login `
   -d '{\"email\":\"aprobado@quickbid.demo\",\"clave\":\"Demo123!\"}'
 ```
 
-El access token JWT HS256 vence por defecto en 30 minutos. Los refresh tokens
-vencen en 14 dias, se guardan hasheados y rotan al usarse. Los tokens de setup
+El access token JWT HS256 vence por defecto en 15 minutos. Los refresh tokens
+vencen en 30 dias, se guardan hasheados y rotan al usarse. Los tokens de setup
 y recuperacion tambien se persisten hasheados; duran 48 horas y 30 minutos.
 En desarrollo local y test la entrega de email queda simulada por defecto: el
 log registra solo metadata de entrega y nunca imprime el token de un solo uso.
@@ -26,7 +26,9 @@ Variables configurables: `APP_JWT_SECRET`, `APP_JWT_ACCESS_TOKEN_MINUTES`,
 `APP_JWT_REFRESH_TOKEN_DAYS`, `APP_FILES_STORAGE_PATH`,
 `APP_MAX_IMAGE_SIZE_BYTES`, `APP_MAX_FILE_SIZE`, `APP_MAX_REQUEST_SIZE` y
 `APP_MAX_DOCUMENT_SIZE_BYTES`, `APP_PURCHASE_SHIPPING_FLAT_COST`,
-`APP_CONSIGNMENT_RETURN_SHIPPING_FLAT_COST`, `APP_CONSIGNMENT_PUBLISHED_POINTS`,
+`APP_PURCHASE_COMPLETED_POINTS`, `APP_PURCHASE_FINE_GENERATED_POINTS_PENALTY`,
+`APP_PURCHASE_FINE_EXPIRED_POINTS_PENALTY`, `APP_CONSIGNMENT_RETURN_SHIPPING_FLAT_COST`,
+`APP_CONSIGNMENT_PUBLISHED_POINTS`,
 `APP_ADMIN_ENABLED`, `APP_ADMIN_INTERNAL_KEY`, `APP_ADMIN_EMPLOYEE_ID`,
 `APP_MAIL_ENABLED`, `APP_MAIL_FROM`, `APP_MAIL_NOTIFICATIONS_ENABLED`,
 `APP_FRONTEND_BASE_URL` y las variables `SPRING_MAIL_*`.
@@ -52,10 +54,14 @@ Invoke-RestMethod -Method Post http://localhost:8080/api/auth/logout `
   -ContentType 'application/json' -Body $refresh
 ```
 
-Los endpoints protegidos responden envelope JSON uniforme. Token ausente,
-invalido o expirado devuelve `401 UNAUTHORIZED`. Un token valido asociado a una
-cuenta bloqueada o deshabilitada devuelve `403 ACCOUNT_BLOCKED`. Un usuario
-autenticado sin permisos suficientes devuelve `403 FORBIDDEN`.
+El login devuelve `estadoCuenta` al nivel principal de `data`. Una cuenta
+`bloqueada_permanente` puede iniciar sesion de forma limitada para que la app
+muestre la pantalla informativa de bloqueo, pero ese token no habilita
+navegacion ni operaciones reales. Los endpoints protegidos responden envelope
+JSON uniforme: token ausente, invalido o expirado devuelve `401 UNAUTHORIZED`;
+un token valido asociado a una cuenta bloqueada o deshabilitada devuelve
+`403 ACCOUNT_BLOCKED`; y un usuario autenticado sin permisos suficientes
+devuelve `403 FORBIDDEN`.
 
 ## Email SMTP
 
@@ -113,12 +119,16 @@ Los endpoints de usuario requieren `Authorization: Bearer <accessToken>`:
 
 ```text
 GET   /api/usuario/perfil
-GET   /api/usuario/estadisticas
+GET   /api/usuario/estadisticas?periodo=mes|trimestre|anual|total
 GET   /api/usuario/historial?page=0&size=20
-GET   /api/usuario/notificaciones?leida=false&page=0&size=20
+GET   /api/usuario/notificaciones?categoria=&tipo=&leida=false&page=0&size=20
 PATCH /api/usuario/notificaciones/{id}/leer
 GET   /api/usuario/direccion-envio
 PUT   /api/usuario/direccion-envio
+GET   /api/usuario/direcciones-envio
+POST  /api/usuario/direcciones-envio
+DELETE /api/usuario/direcciones-envio/{id}
+PATCH /api/usuario/direcciones-envio/{id}/principal
 ```
 
 Ejemplos PowerShell, luego de guardar el token retornado por login:
@@ -126,14 +136,14 @@ Ejemplos PowerShell, luego de guardar el token retornado por login:
 ```powershell
 $headers = @{ Authorization = "Bearer $accessToken" }
 Invoke-RestMethod http://localhost:8080/api/usuario/perfil -Headers $headers
-Invoke-RestMethod http://localhost:8080/api/usuario/estadisticas -Headers $headers
+Invoke-RestMethod 'http://localhost:8080/api/usuario/estadisticas?periodo=trimestre' -Headers $headers
 Invoke-RestMethod 'http://localhost:8080/api/usuario/historial?page=0&size=10' -Headers $headers
 Invoke-RestMethod 'http://localhost:8080/api/usuario/notificaciones?leida=false' -Headers $headers
 Invoke-RestMethod -Method Patch http://localhost:8080/api/usuario/notificaciones/18001/leer -Headers $headers
 Invoke-RestMethod http://localhost:8080/api/usuario/direccion-envio -Headers $headers
 ```
 
-Para crear o actualizar la direccion principal:
+Para crear o actualizar la direccion principal legacy:
 
 ```powershell
 $direccion = @{
@@ -150,9 +160,32 @@ Invoke-RestMethod -Method Put http://localhost:8080/api/usuario/direccion-envio 
   -Headers $headers -ContentType 'application/json' -Body $direccion
 ```
 
+Los endpoints finales de coleccion permiten hasta cinco direcciones activas por
+cuenta, usan baja logica y garantizan una unica principal:
+
+```powershell
+Invoke-RestMethod http://localhost:8080/api/usuario/direcciones-envio -Headers $headers
+Invoke-RestMethod -Method Post http://localhost:8080/api/usuario/direcciones-envio `
+  -Headers $headers -ContentType 'application/json' -Body $direccion
+Invoke-RestMethod -Method Patch http://localhost:8080/api/usuario/direcciones-envio/5101/principal `
+  -Headers $headers
+Invoke-RestMethod -Method Delete http://localhost:8080/api/usuario/direcciones-envio/5101 `
+  -Headers $headers
+```
+
 Una cuenta `restriccion_multa` puede consultar perfil, estadisticas, historial,
 notificaciones y direccion. La restriccion debe bloquear su inscripcion y sus
 pujas en los modulos de subastas.
+
+`/api/usuario/estadisticas` acepta `mes`, `trimestre`, `anual` y `total`; el
+periodo filtra los calculos y la respuesta conserva metricas agregadas
+compatibles, ademas de secciones separadas `compradorPostor` y
+`vendedorConsignador`. El historial es paginado e incluye pujas aceptadas,
+ganadoras y superadas junto con compras.
+
+Las notificaciones son `leida/no_leida`. La app puede marcar una o todas como
+leidas; la limpieza automatizable vive en admin auxiliar y elimina leidas con
+mas de 30 dias y no leidas con mas de 90 dias, sin borrar documentos.
 
 ## Medios De Pago De Usuario
 
@@ -168,10 +201,11 @@ PATCH  /api/usuario/medios-pago/{id}/principal
 
 Una tarjeta o cuenta bancaria se registra con JSON. Todo medio nuevo queda en
 `pendiente_verificacion`; no suma puntos ni puede marcarse como principal hasta
-que un empleado lo verifique manualmente. La verificacion acredita 50 puntos,
-genera auditoria y notificacion, y tiene vigencia estimada de 5 dias habiles.
-El servicio interno para verificar o rechazar ya esta preparado; su endpoint
-protegido esta publicado bajo `/api/admin/medios-pago/**`.
+que un empleado lo verifique manualmente. La verificacion acredita 30 puntos,
+genera auditoria y notificacion, y tiene vigencia de 5 dias habiles. Verificar
+o revalidar exige `limiteAprobado`; un limite nulo no se interpreta como
+infinito. El admin puede revalidar un medio `vencido` o `verificado` desde
+`/api/admin/medios-pago/{id}/verificar`, reiniciando el plazo.
 
 Ejemplo de tarjeta con datos ficticios:
 
@@ -225,6 +259,8 @@ El backend no persiste PAN completo ni CVV. Conserva hash y ultimos cuatro
 digitos de tarjeta; para cuentas bancarias conserva hashes de los
 identificadores sensibles. El borrado es logico y se rechaza si el medio esta
 asociado a una operacion critica. Solo puede existir un principal por moneda.
+Los medios verificados expirados pueden marcarse `vencido` desde el endpoint
+admin auxiliar `/api/admin/medios-pago/vencer-expirados`.
 
 ## Subastas, Catalogos E Inscripcion Previa
 
@@ -262,9 +298,9 @@ La inscripcion previa manifiesta interes y asocia un medio de pago. No equivale
 a participacion efectiva, no crea `asistentes` legacy y no falla porque el
 usuario participe en otra subasta. Solo se permite hasta 60 minutos antes del
 inicio. Alcanza un medio guardado de la misma moneda en estado
-`pendiente_verificacion` o `verificado`; si su fecha `verificado_hasta` ya
-expiro, se trata como equivalente funcional a `vencido` y queda pendiente de
-revalidacion.
+`pendiente_verificacion`, `verificado` o `vencido`; si requiere validacion o
+revalidacion, queda pendiente. Una inscripcion `rechazada` se conserva como
+historial y no bloquea un nuevo intento con otro medio.
 
 En este README, una verificacion `vencida` o `expirada` significa que termino
 la vigencia temporal de la validacion manual de empresa expresada por
@@ -302,9 +338,9 @@ Invoke-RestMethod -Method Post http://localhost:8080/api/subastas/6001/pujar `
 
 `clientStateVersion` debe coincidir con el snapshot consultado. Si otra puja
 llego antes, el backend responde `409 BID_OUTDATED_STATE` y el cliente debe
-refrescar el estado. `idempotencyKey` es opcional, pero conviene enviarlo: al
-repetir exactamente la misma solicitud devuelve la puja existente sin duplicar
-filas; reutilizar la clave con otro payload devuelve `409 IDEMPOTENCY_CONFLICT`.
+refrescar el estado. `idempotencyKey` es obligatorio: al repetir exactamente la
+misma solicitud devuelve la puja existente sin duplicar filas, reservas ni
+puntos; reutilizar la clave con otro payload devuelve `409 IDEMPOTENCY_CONFLICT`.
 
 La aceptacion toma lock pesimista sobre `app_subasta_estado_vivo`, revalida las
 reglas dentro de la transaccion, incrementa la version, deja la oferta anterior
@@ -312,6 +348,12 @@ como `superada`, inserta `app_pujas_live` y sincroniza `asistentes` y `pujos`
 legacy. Para categorias `comun`, `especial` y `plata`, el incremento minimo es
 1% del precio base y el maximo es 20%. Para `oro` y `platino`, alcanza una
 unidad monetaria sobre la mejor oferta y no aplica ese maximo.
+
+Cada puja aceptada suma 1 punto y crea una reserva activa sobre el limite del
+medio de pago. Si la puja es superada, la reserva se libera. Si gana el lote, la
+reserva se convierte en consumo real y el ganador recibe 80 puntos adicionales.
+La disponibilidad de un medio considera consumo real mas reservas activas; un
+limite nulo nunca se interpreta como infinito.
 
 ## Realtime De Subastas
 
@@ -357,7 +399,7 @@ Los endpoints de compras requieren token Bearer. Cada usuario solo puede ver y
 operar sus propias compras:
 
 ```text
-GET  /api/compras?page=0&size=20
+GET  /api/compras?page=0&size=20&estado=pagos_extra_pendientes
 GET  /api/compras/{id}
 PUT  /api/compras/{id}/entrega
 POST /api/compras/{id}/pagar
@@ -368,7 +410,7 @@ GET  /api/compras/{id}/documentos
 Ejemplos de consulta:
 
 ```powershell
-Invoke-RestMethod 'http://localhost:8080/api/compras?page=0&size=20' -Headers $headers
+Invoke-RestMethod 'http://localhost:8080/api/compras?page=0&size=20&estado=pagos_extra_pendientes' -Headers $headers
 Invoke-RestMethod http://localhost:8080/api/compras/13002 -Headers $headers
 Invoke-RestMethod http://localhost:8080/api/compras/13002/documentos -Headers $headers
 ```
@@ -376,9 +418,12 @@ Invoke-RestMethod http://localhost:8080/api/compras/13002/documentos -Headers $h
 Al cerrar un lote, el backend toma lock pesimista sobre el snapshot vivo. Si
 existe una oferta aceptada, la marca `ganadora`, actualiza `pujos.ganador`,
 registra la compra y sincroniza `registroDeSubasta` legacy cuando existe duenio.
-Luego intenta cobrar automaticamente solo el monto adjudicado. Si nadie pujo,
-crea una compra interna con `comprador_empresa=true`; este caso vive en
-`app_compras` porque legacy exige un cliente normal.
+Luego intenta cobrar automaticamente solo el monto adjudicado. Las comisiones de
+comprador y vendedor se calculan sobre el precio final adjudicado usando la
+proporcion de `itemsCatalogo.comision` sobre `precioBase`, y quedan congeladas
+en `app_compras`. Si nadie pujo, crea una compra interna con
+`comprador_empresa=true`, precio base y comision de comprador en cero; este caso
+vive en `app_compras` porque legacy exige un cliente normal.
 
 El cobro automatico aprobado deja la compra en `pagos_extra_pendientes`. Si
 falla, genera una multa del 10%, restringe la cuenta y fija un plazo de 72
@@ -398,8 +443,9 @@ $retiro = @{ tipo = 'retiro' } | ConvertTo-Json
 
 El retiro no cobra envio y registra perdida de cobertura al retirar. Para envio
 se usa un costo plano configurable mediante `APP_PURCHASE_SHIPPING_FLAT_COST`,
-con valor dev por defecto `5000`. La comision del comprador usa el importe
-legacy `itemsCatalogo.comision`.
+con valor dev por defecto `5000`. Al aprobar extras, la direccion de envio se
+congela como snapshot en `app_entregas`; desde ese momento no se puede cambiar
+el modo de entrega de esa compra.
 
 Pago de extras y regularizacion de multa:
 
@@ -429,7 +475,10 @@ completada
 
 Los servicios internos tambien permiten cerrar subasta, forzar exito o falla
 de pago, vencer multas, completar entrega/retiro y marcar abandono. Los
-endpoints admin HTTP para simulaciones, multas y cierre ya estan publicados.
+endpoints admin HTTP para simulaciones, multas, abandono y cierre ya estan
+publicados. Los comprobantes de compra y recibos de multa se exponen como
+metadata autorizada en `/api/compras/{id}/documentos`; la generacion binaria real
+del PDF queda fuera de esta implementacion.
 
 ## Consignacion De Bienes
 
@@ -444,7 +493,7 @@ datos son responsabilidad del usuario.
 GET  /api/consignaciones/requisitos
 POST /api/consignaciones
 POST /api/consignaciones/{id}/documentacion-origen
-GET  /api/consignaciones?filtro=activas&page=0&size=20
+GET  /api/consignaciones?filtro=activas|rechazadas|vendidas&page=0&size=20
 GET  /api/consignaciones/{id}
 POST /api/consignaciones/{id}/acuerdo/aceptar
 POST /api/consignaciones/{id}/acuerdo/rechazar
@@ -460,7 +509,7 @@ crean filas legacy en `productos`, `fotos` ni `duenios`.
 ```powershell
 curl.exe -X POST http://localhost:8080/api/consignaciones `
   -H "Authorization: Bearer $accessToken" `
-  -F "segmento=comun" -F "aceptaTyC=true" `
+  -F "segmento=arte" -F "categoriaSubasta=comun" -F "aceptaTyC=true" `
   -F "declaracionPropiedadYOrigenLicito=true" `
   -F "titulo=Vasija demo" -F "descripcion=Solicitud manual" `
   -F "fotos=@C:\temp\foto-01.png;type=image/png" `
@@ -472,7 +521,12 @@ curl.exe -X POST http://localhost:8080/api/consignaciones `
 ```
 
 La documentación de origen admite PDF o imágenes con validación binaria. Al
-subirla queda en `documentacion_recibida`: nunca se aprueba automáticamente.
+subirla vuelve a `pendiente_revision` con documentos pendientes: nunca se aprueba automaticamente.
+El backend acepta entre seis y quince fotos. `segmento` es rubro o tema del
+bien, por ejemplo arte, joyas, vehiculos o relojeria. `categoriaSubasta` queda
+reservada para `comun`, `especial`, `plata`, `oro` o `platino`; si se omite, se
+usa `comun` por compatibilidad.
+
 Al aceptar el acuerdo se materializan `productos` y `fotos` legacy. Al publicar
 se crea el ítem de catálogo, se congela la comisión del comprador, se suma el
 movimiento de puntos y se asigna póliza. Una póliza combinada solo puede reunir
@@ -483,12 +537,14 @@ elegir envio, el cobro se valida recien al pagar la devolucion: el usuario puede
 usar un medio distinto al registrado cuando inicio la consignacion, pero ese
 instrumento debe estar `verificado`, con `verificado_hasta` vigente, moneda
 compatible y fondos o limite suficientes.
+Al pagar ese envio se genera metadata de comprobante de devolucion.
 
 La liquidacion exige una cuenta bancaria destino registrada y no eliminada. No
 requiere que su verificacion manual siga vigente y no se bloquea
 automaticamente si la empresa la marco como rechazada luego de iniciada la
 consignacion; la transferencia se intenta contra la cuenta elegida por el
 usuario y queda auditada.
+Al liquidar se genera metadata de liquidacion.
 
 Los endpoints admin permiten solicitar y
 revisar documentación, aprobar o rechazar revisión digital y física, verificar
@@ -547,8 +603,8 @@ Variables principales:
 | `DB_USERNAME` | Sí, salvo default `dev` | `postgres` en `dev` | Usuario PostgreSQL |
 | `DB_PASSWORD` | Sí | Sin default | Clave PostgreSQL |
 | `APP_JWT_SECRET` | Sí | Sin default | Secreto HS256 de al menos 32 caracteres |
-| `APP_JWT_ACCESS_TOKEN_MINUTES` | No | `30` | Vigencia access token |
-| `APP_JWT_REFRESH_TOKEN_DAYS` | No | `14` | Vigencia refresh token |
+| `APP_JWT_ACCESS_TOKEN_MINUTES` | No | `15` | Vigencia access token |
+| `APP_JWT_REFRESH_TOKEN_DAYS` | No | `30` | Vigencia refresh token |
 | `APP_FILES_STORAGE_PATH` | No | `./uploads` | Directorio de binarios |
 | `APP_MAX_IMAGE_SIZE_BYTES` | No | `10485760` | Máximo por imagen |
 | `APP_MAX_DOCUMENT_SIZE_BYTES` | No | `10485760` | Máximo por documento |
@@ -565,6 +621,9 @@ Variables principales:
 | `SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH` | No | `true` | Autenticacion SMTP |
 | `SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE` | No | `true` | STARTTLS SMTP |
 | `APP_PURCHASE_SHIPPING_FLAT_COST` | No | `5000` | Envío plano de compras |
+| `APP_PURCHASE_COMPLETED_POINTS` | No | `60` | Puntos por compra completada a tiempo |
+| `APP_PURCHASE_FINE_GENERATED_POINTS_PENALTY` | No | `90` | Puntos restados al generar multa |
+| `APP_PURCHASE_FINE_EXPIRED_POINTS_PENALTY` | No | `250` | Puntos restados al vencer multa |
 | `APP_CONSIGNMENT_RETURN_SHIPPING_FLAT_COST` | No | `12000` | Envío de devolución |
 | `APP_CONSIGNMENT_PUBLISHED_POINTS` | No | `70` | Puntos por publicación |
 | `APP_ADMIN_ENABLED` | No | `false` | Habilita backoffice auxiliar |
@@ -624,6 +683,15 @@ Detener el backend antes de eliminar esa base temporal.
   física de consignaciones.
 - `V7__payment_method_rejection_reason.sql`: motivo persistido para el rechazo
   manual de medios de pago.
+- `V8__registration_retries_and_payment_revalidation.sql`: unicidad parcial para
+  reintentos de inscripciones rechazadas.
+- `V9__bid_reservations_and_lot_timers.sql`: reservas `app_*` de medios para
+  pujas ganadoras activas y columnas de programacion de lote/subasta.
+- `V10__purchase_commissions_addresses_documents.sql`: comisiones congeladas de
+  comprador/vendedor y snapshot de direccion de entrega.
+- `V11__consignment_segment_and_review_flow.sql`: separa `segmento` de
+  `categoriaSubasta` en consignaciones y migra datos existentes sin tocar
+  tablas legacy.
 
 `V4` usa IDs explícitos en rangos demo y resincroniza las secuencias al final.
 Flyway ejecuta cada migración una sola vez por base. Para reiniciar todos los
@@ -777,15 +845,23 @@ PATCH /api/admin/usuarios/{id}/categoria
 GET  /api/admin/medios-pago
 POST /api/admin/medios-pago/{id}/verificar
 POST /api/admin/medios-pago/{id}/rechazar
+POST /api/admin/medios-pago/vencer-expirados
+POST /api/admin/vencimientos/procesar
+POST /api/admin/multas/vencer-expiradas
+POST /api/admin/compras/abandonar-vencidas
+POST /api/admin/consignaciones/devoluciones/vencer
+POST /api/admin/notificaciones/limpiar
 POST /api/admin/subastas
 PATCH /api/admin/subastas/{id}
 POST /api/admin/subastas/{id}/abrir
 POST /api/admin/subastas/{id}/cerrar
 POST /api/admin/subastas/{id}/item-activo
 POST /api/admin/subastas/{id}/cerrar-lote
+POST /api/admin/subastas/timers/procesar
 POST /api/admin/subastas/{id}/catalogo/items
 POST /api/admin/compras/{id}/simular-pago-exitoso
 POST /api/admin/compras/{id}/simular-falla-pago
+POST /api/admin/compras/{id}/abandonar?retiro=false
 POST /api/admin/multas/{id}/vencer
 POST /api/admin/multas/{id}/marcar-pagada
 GET  /api/admin/consignaciones
@@ -807,6 +883,13 @@ POST /api/admin/seed/demo-subastas
 POST /api/admin/reset/demo
 ```
 
+Los endpoints de vencimientos son procesadores auxiliares idempotentes para
+operacion manual o cron externo: vencen medios verificados expirados, bloquean
+cuentas con multas vencidas, marcan compras con extras impagos por mas de 72
+horas, marcan devoluciones de consignacion vencidas por mas de 72 horas y
+limpian notificaciones antiguas. No hay scheduler background productivo dentro
+del proceso; queda como integracion operativa pendiente.
+
 Ejemplos:
 
 ```powershell
@@ -814,7 +897,8 @@ Invoke-RestMethod -Method Post http://localhost:8080/api/admin/solicitudes-regis
   -Headers $adminHeaders -ContentType 'application/json' `
   -Body '{"documento":"DNI-DEMO-001","categoriaInicial":"comun"}'
 Invoke-RestMethod -Method Post http://localhost:8080/api/admin/medios-pago/5003/verificar `
-  -Headers $adminHeaders
+  -Headers $adminHeaders -ContentType 'application/json' `
+  -Body '{"limiteAprobado":150000}'
 Invoke-RestMethod -Method Post http://localhost:8080/api/admin/subastas/6004/abrir `
   -Headers $adminHeaders
 Invoke-RestMethod -Method Post http://localhost:8080/api/admin/subastas/6004/cerrar-lote `
@@ -875,8 +959,10 @@ no dependa de una instalación PostgreSQL local:
 
 La validación real de Flyway debe ejecutarse adicionalmente contra una base
 PostgreSQL vacía, porque H2 no reemplaza las pruebas del dialecto productivo.
-Se verificó el arranque con perfil `dev` desde cero sobre PostgreSQL local:
-health `UP`, `45` tablas y `V1` a `V7` aplicadas correctamente.
+Se verifico previamente el arranque con perfil `dev` desde cero sobre
+PostgreSQL local para `V1` a `V8`. Tras agregar `V9`, `V10` y `V11`,
+corresponde validar de nuevo Flyway sobre una base PostgreSQL vacia antes de la
+entrega final.
 
 ## Decisiones Y Limitaciones Conocidas
 
@@ -888,8 +974,11 @@ health `UP`, `45` tablas y `V1` a `V7` aplicadas correctamente.
   suscripcion. Heartbeat, `DISCONNECT` y TTL limpian presencia local. Para un
   despliegue horizontal, la presencia debe moverse a un backend compartido
   como Redis.
-- Los documentos de compra se listan como metadata autorizada. No se publica un
-  endpoint general de descarga de binarios.
+- Los documentos de compra y consignacion se listan como metadata autorizada.
+  No se publica un endpoint general de descarga de binarios.
+- Los vencimientos criticos tienen endpoints admin auxiliares testeados. El
+  scheduler background productivo debe conectarse como cron externo o tarea
+  `@Scheduled` antes de operar sin backoffice manual.
 - El rate limiting vive en memoria por instancia. Para despliegue horizontal
   debe moverse a un backend compartido como Redis.
 - Los endpoints admin están apagados por defecto. Para producción requieren una
@@ -904,7 +993,7 @@ El estado punto por punto está documentado en
   `APP_JWT_SECRET` con un valor largo; no usar defaults compartidos.
 - Error de conexión PostgreSQL: verificar `DB_URL`, `DB_USERNAME`,
   `DB_PASSWORD`, servicio local y existencia de la base.
-- Error de Hibernate al iniciar: revisar que Flyway haya aplicado `V1` a `V7`
+- Error de Hibernate al iniciar: revisar que Flyway haya aplicado `V1` a `V11`
   y consultar `flyway_schema_history`.
 - `401 UNAUTHORIZED`: enviar `Authorization: Bearer <accessToken>` vigente.
 - `403 ACCOUNT_BLOCKED`: usar otra cuenta demo o regularizar el escenario de

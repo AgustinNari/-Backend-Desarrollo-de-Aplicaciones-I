@@ -46,6 +46,7 @@ import com.example.quickbid.quickbid.repository.app.NotificacionAppRepository;
 @Service
 public class SubastaService {
 	private static final Set<String> ENROLLMENT_PAYMENT_STATES = Set.of("pendiente_verificacion", "verificado", "vencido");
+	private static final Set<String> ACTIVE_ENROLLMENT_STATES = Set.of("pendiente_validacion", "aprobada");
 	private static final Set<String> AUCTION_STATES = Set.of("programada", "abierta", "en_vivo", "cerrada", "finalizada");
 	private static final Set<String> AUCTION_CATEGORIES = Set.of("comun", "especial", "plata", "oro", "platino");
 	private static final Set<String> CURRENCIES = Set.of("ARS", "USD");
@@ -150,8 +151,8 @@ public class SubastaService {
 		Integer activeItem = activeItem(subastaId);
 		boolean noActiveItem = activeItem == null;
 		boolean otherParticipation = participatingInOtherAuction(cuentaId, subastaId);
-		boolean enrolled = inscripciones.findBySubastaIdAndCuentaId(subastaId, cuentaId)
-				.filter(i -> !Set.of("rechazada", "expirada").contains(i.getEstado())).isPresent();
+		boolean enrolled = inscripciones.findFirstBySubastaIdAndCuentaIdAndEstadoInOrderByCreatedAtDesc(
+				subastaId, cuentaId, ACTIVE_ENROLLMENT_STATES).isPresent();
 		boolean canEnroll = active && categoryOk && !enrollmentClosed && !compatibleEnrollment.isEmpty() && !enrolled;
 		boolean canBid = active && categoryOk && auction.estadoOperativo().equals("en_vivo") && !noActiveItem
 				&& !validBid.isEmpty() && !otherParticipation;
@@ -172,7 +173,8 @@ public class SubastaService {
 		if (!cuenta.getEstado().equals("activa")) throw forbidden("La cuenta no puede inscribirse", "ACCOUNT_RESTRICTED_BY_FINE");
 		if (categoryOrder(cuenta.getCategoriaCalculada()) < categoryOrder(auction.categoria())) throw forbidden("Categoria insuficiente", "AUCTION_CATEGORY_FORBIDDEN");
 		if (!enrollmentOpen(auction)) throw conflict("La inscripcion ya cerro", "AUCTION_ENROLLMENT_CLOSED");
-		var existing = inscripciones.findBySubastaIdAndCuentaId(subastaId, cuentaId);
+		var existing = inscripciones.findFirstBySubastaIdAndCuentaIdAndEstadoInOrderByCreatedAtDesc(
+				subastaId, cuentaId, ACTIVE_ENROLLMENT_STATES);
 		if (existing.isPresent()) return registration(existing.get(), true);
 		MedioPago medio = selectEnrollmentPayment(cuentaId, auction.moneda(), medioPagoId);
 		boolean review = requiresReview(medio);

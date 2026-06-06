@@ -36,8 +36,8 @@ public class PurchaseController {
 
 	@GetMapping
 	public ApiResponse<Page<Summary>> list(Authentication authentication, @RequestParam(defaultValue = "0") int page,
-			@RequestParam(defaultValue = "20") int size) {
-		return ApiResponse.success(purchases.list(accountId(authentication), page, size), "Compras");
+			@RequestParam(defaultValue = "20") int size, @RequestParam(required = false) String estado) {
+		return ApiResponse.success(purchases.list(accountId(authentication), estado, page, size), "Compras");
 	}
 
 	@GetMapping("/{id}")

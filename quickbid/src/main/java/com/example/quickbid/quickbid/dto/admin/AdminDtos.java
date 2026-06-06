@@ -40,6 +40,9 @@ public final class AdminDtos {
 	public record Reason(@NotBlank String motivo) {
 	}
 
+	public record PaymentVerification(@NotNull BigDecimal limiteAprobado) {
+	}
+
 	public record Points(@NotNull Integer delta) {
 	}
 

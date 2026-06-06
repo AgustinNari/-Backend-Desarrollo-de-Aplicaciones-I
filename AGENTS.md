@@ -1,3 +1,6 @@
+> **Actualización post revisión de inconsistencias:** si este archivo contradice `docs/00_decisiones_finales.md`, `docs/API_CONTRATO_FINAL.md` o `docs/10_plan_correcciones_backend.md`, prevalecen esos documentos finales. La carpeta `source_material/` queda como histórico y no como fuente superior.
+
+
 # AGENTS.md — QuickBid Backend
 
 Este repositorio debe implementar el backend completo de **QuickBid**, una app móvil de subastas dinámicas ascendentes, compras, pagos, consignación de bienes, perfil, estadísticas y notificaciones.

@@ -3,6 +3,7 @@ package com.example.quickbid.quickbid.service;
 import java.math.BigDecimal;
 import java.sql.PreparedStatement;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Set;
 
@@ -43,7 +44,7 @@ import com.example.quickbid.quickbid.service.PurchaseService.PaymentOutcome;
 @Service
 public class AdminService {
 	private static final Set<String> CATEGORIES = Set.of("comun", "especial", "plata", "oro", "platino");
-	private static final Set<String> PAYMENT_METHOD_STATES = Set.of("pendiente_verificacion", "verificado", "rechazado", "eliminado");
+	private static final Set<String> PAYMENT_METHOD_STATES = Set.of("pendiente_verificacion", "verificado", "rechazado", "vencido", "eliminado");
 	private final JdbcTemplate jdbc;
 	private final SolicitudRegistroRepository registrations;
 	private final RegistrationApprovalService registrationApproval;
@@ -52,6 +53,7 @@ public class AdminService {
 	private final CategoriaService categories;
 	private final MedioPagoService paymentMethods;
 	private final PurchaseService purchases;
+	private final AuctionTimerService auctionTimers;
 	private final ConsignmentService consignments;
 	private final AuditService audit;
 	private final Environment environment;
@@ -62,8 +64,9 @@ public class AdminService {
 	public AdminService(JdbcTemplate jdbc, SolicitudRegistroRepository registrations,
 			RegistrationApprovalService registrationApproval, CuentaAppRepository accounts, ClienteRepository clients,
 			CategoriaService categories, MedioPagoService paymentMethods, PurchaseService purchases,
-			ConsignmentService consignments, AuditService audit, Environment environment, MailNotificationService mail,
-			AdminQueryRepository queries, AuctionQueryRepository auctionQueries) {
+			AuctionTimerService auctionTimers, ConsignmentService consignments, AuditService audit,
+			Environment environment, MailNotificationService mail, AdminQueryRepository queries,
+			AuctionQueryRepository auctionQueries) {
 		this.jdbc = jdbc;
 		this.registrations = registrations;
 		this.registrationApproval = registrationApproval;
@@ -72,6 +75,7 @@ public class AdminService {
 		this.categories = categories;
 		this.paymentMethods = paymentMethods;
 		this.purchases = purchases;
+		this.auctionTimers = auctionTimers;
 		this.consignments = consignments;
 		this.audit = audit;
 		this.environment = environment;
@@ -146,12 +150,62 @@ public class AdminService {
 		return queries.findPaymentMethods(normalizedState);
 	}
 
-	public MedioPagoResponse verifyPaymentMethod(Long id, Integer employeeId) {
-		return paymentMethods.verify(id, employeeId);
+	public MedioPagoResponse verifyPaymentMethod(Long id, BigDecimal approvedLimit, Integer employeeId) {
+		return paymentMethods.verify(id, employeeId, approvedLimit);
 	}
 
 	public MedioPagoResponse rejectPaymentMethod(Long id, String reason, Integer employeeId) {
 		return paymentMethods.reject(id, employeeId, reason);
+	}
+
+	public Status expirePaymentMethods(Integer employeeId) {
+		int expired = paymentMethods.expireVerified();
+		audit(employeeId, "medio_pago.verificaciones_vencidas", "medio_pago", null);
+		return new Status("procesado", expired + " medios vencidos");
+	}
+
+	public Status processDueJobs(Integer employeeId) {
+		int expiredPaymentMethods = paymentMethods.expireVerified();
+		int fines = purchases.expireDueFines();
+		int purchases = this.purchases.abandonDueExtraPayments();
+		int returns = consignments.expireDueReturns(employeeId);
+		int notifications = cleanupOldNotifications();
+		audit(employeeId, "vencimientos.procesados", "sistema", null);
+		return new Status("procesado", "Medios vencidos: " + expiredPaymentMethods + ", multas vencidas: " + fines
+				+ ", compras abandonadas: " + purchases + ", devoluciones vencidas: " + returns
+				+ ", notificaciones eliminadas: " + notifications);
+	}
+
+	public Status expireDueFines(Integer employeeId) {
+		int expired = purchases.expireDueFines();
+		audit(employeeId, "multas.vencidas_procesadas", "multa", null);
+		return new Status("procesado", expired + " multas vencidas");
+	}
+
+	public Status abandonDuePurchases(Integer employeeId) {
+		int abandoned = purchases.abandonDueExtraPayments();
+		audit(employeeId, "compras.vencidas_procesadas", "compra", null);
+		return new Status("procesado", abandoned + " compras abandonadas");
+	}
+
+	public Status expireDueConsignmentReturns(Integer employeeId) {
+		int expired = consignments.expireDueReturns(employeeId);
+		audit(employeeId, "consignaciones.devoluciones_vencidas_procesadas", "consignacion", null);
+		return new Status("procesado", expired + " devoluciones vencidas");
+	}
+
+	public Status cleanupNotifications(Integer employeeId) {
+		int deleted = cleanupOldNotifications();
+		audit(employeeId, "notificaciones.limpieza_antiguas", "notificacion", null);
+		return new Status("procesado", deleted + " notificaciones eliminadas");
+	}
+
+	private int cleanupOldNotifications() {
+		return jdbc.update("""
+				DELETE FROM app_notificaciones
+				WHERE (leida = true AND COALESCE(read_at, created_at) < ?)
+				   OR (leida = false AND created_at < ?)
+				""", OffsetDateTime.now().minusDays(30), OffsetDateTime.now().minusDays(90));
 	}
 
 	@Transactional
@@ -222,8 +276,10 @@ public class AdminService {
 		if (!auctionQueries.existsAuctionItem(id, itemId)) throw bad("El item no pertenece a la subasta", "INVALID_AUCTION_ITEM");
 		jdbc.update("""
 				UPDATE app_subasta_estado_vivo SET item_catalogo_activo_id=?,version=version+1,
-					lote_iniciado_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE subasta_id=?
-				""", itemId, id);
+					lote_iniciado_at=CURRENT_TIMESTAMP,lote_finaliza_estimado_at=?,
+					proximo_lote_programado_at=NULL,subasta_finaliza_programado_at=NULL,updated_at=CURRENT_TIMESTAMP
+				WHERE subasta_id=?
+				""", itemId, OffsetDateTime.now().plusSeconds(60), id);
 		audit(employeeId, "subasta.item_activo_actualizado", "subasta", id.longValue());
 		return new Status("item_activo", "Item activo " + itemId);
 	}
@@ -232,6 +288,14 @@ public class AdminService {
 		Detail detail = purchases.closeLot(id, outcome);
 		audit(employeeId, "subasta.lote_cerrado_admin", "compra", detail.id());
 		return detail;
+	}
+
+	public Status processAuctionTimers(Integer employeeId) {
+		var result = auctionTimers.processDueTimers();
+		audit(employeeId, "subasta.timers_procesados", "subasta", null);
+		return new Status("procesado", "Lotes cerrados: " + result.lotesCerrados()
+				+ ", lotes activados: " + result.lotesActivados()
+				+ ", subastas finalizadas: " + result.subastasFinalizadas());
 	}
 
 	@Transactional
@@ -266,6 +330,12 @@ public class AdminService {
 						: purchases.simulateFailedExtras(request.cuentaId(), purchaseId, request.medioPagoId());
 		audit(employeeId, success ? "pago.simulacion_exitosa" : "pago.simulacion_fallida", "pago", payment.id());
 		return payment;
+	}
+
+	public Status abandonPurchase(Long id, boolean pickupFailure, Integer employeeId) {
+		purchases.abandon(id, pickupFailure);
+		audit(employeeId, "compra.abandonada_admin", "compra", id);
+		return new Status("abandonada", "Compra marcada como abandonada");
 	}
 
 	public Status expireFine(Long id, Integer employeeId) {

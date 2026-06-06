@@ -27,19 +27,48 @@ public class UsuarioQueryRepository {
 		this.jdbc = jdbc;
 	}
 
-	public StatisticsSnapshot statistics(Long accountId) {
-		return jdbc.queryForObject("""
+	public StatisticsSnapshot statistics(Long accountId, OffsetDateTime since) {
+		String bidPeriod = since == null ? "" : " AND created_at >= ?";
+		String paymentPeriod = since == null ? "" : " AND p.created_at >= ?";
+		String purchasePeriod = since == null ? "" : " AND created_at >= ?";
+		String consignmentPeriod = since == null ? "" : " AND created_at >= ?";
+		String liquidationPeriod = since == null ? "" : " AND paid_at >= ?";
+		List<Object> args = new ArrayList<>();
+		String sql = """
 				SELECT
-				  (SELECT COALESCE(SUM(monto),0) FROM app_pujas_live WHERE cuenta_id=?) total_bid,
+				  (SELECT COALESCE(SUM(monto),0) FROM app_pujas_live WHERE cuenta_id=?%s) total_bid,
 				  (SELECT COALESCE(SUM(p.monto),0) FROM app_pagos p JOIN app_compras c ON c.id=p.compra_id
-				   WHERE c.cuenta_comprador_id=? AND p.estado='aprobado') total_paid,
-				  (SELECT COUNT(*) FROM app_pujas_live WHERE cuenta_id=?) bids,
-				  (SELECT COUNT(*) FROM app_compras WHERE cuenta_comprador_id=?) purchases,
-				  (SELECT COUNT(DISTINCT subasta_id) FROM app_pujas_live WHERE cuenta_id=?) auctions,
-				  (SELECT COUNT(*) FROM app_pujas_live WHERE cuenta_id=? AND estado='ganadora') wins
-				""", (rs, row) -> new StatisticsSnapshot(rs.getBigDecimal("total_bid"), rs.getBigDecimal("total_paid"),
-						rs.getInt("bids"), rs.getInt("purchases"), rs.getInt("auctions"), rs.getInt("wins")),
-				accountId, accountId, accountId, accountId, accountId, accountId);
+				   WHERE c.cuenta_comprador_id=? AND p.estado='aprobado'%s) total_paid,
+				  (SELECT COUNT(*) FROM app_pujas_live WHERE cuenta_id=?%s) bids,
+				  (SELECT COUNT(*) FROM app_compras WHERE cuenta_comprador_id=?%s) purchases,
+				  (SELECT COUNT(DISTINCT subasta_id) FROM app_pujas_live WHERE cuenta_id=?%s) auctions,
+				  (SELECT COUNT(*) FROM app_pujas_live WHERE cuenta_id=? AND estado='ganadora'%s) wins,
+				  (SELECT COUNT(*) FROM app_solicitudes_consignacion WHERE cuenta_id=?%s) consignments,
+				  (SELECT COUNT(*) FROM app_solicitudes_consignacion WHERE cuenta_id=?
+				    AND estado IN ('vendida','comprada_por_empresa','liquidada')%s) sold_consignments,
+				  (SELECT COUNT(*) FROM app_solicitudes_consignacion WHERE cuenta_id=? AND estado='liquidada'%s)
+				    liquidated_consignments,
+				  (SELECT COALESCE(SUM(l.monto_neto),0)
+				   FROM app_liquidaciones_consignacion l JOIN app_solicitudes_consignacion s ON s.id=l.solicitud_id
+				   WHERE s.cuenta_id=? AND l.estado='pagada'%s) total_liquidated
+				""".formatted(bidPeriod, paymentPeriod, bidPeriod, purchasePeriod, bidPeriod, bidPeriod,
+				consignmentPeriod, consignmentPeriod, consignmentPeriod, liquidationPeriod);
+		addPeriodArgs(args, accountId, since);
+		addPeriodArgs(args, accountId, since);
+		addPeriodArgs(args, accountId, since);
+		addPeriodArgs(args, accountId, since);
+		addPeriodArgs(args, accountId, since);
+		addPeriodArgs(args, accountId, since);
+		addPeriodArgs(args, accountId, since);
+		addPeriodArgs(args, accountId, since);
+		addPeriodArgs(args, accountId, since);
+		addPeriodArgs(args, accountId, since);
+		return jdbc.queryForObject(sql, (rs, row) -> new StatisticsSnapshot(rs.getBigDecimal("total_bid"),
+						rs.getBigDecimal("total_paid"), rs.getInt("bids"), rs.getInt("purchases"),
+						rs.getInt("auctions"), rs.getInt("wins"), rs.getInt("consignments"),
+						rs.getInt("sold_consignments"), rs.getInt("liquidated_consignments"),
+						rs.getBigDecimal("total_liquidated")),
+				args.toArray());
 	}
 
 	public long countHistory(Long accountId) {
@@ -73,13 +102,24 @@ public class UsuarioQueryRepository {
 				filter.args().toArray());
 	}
 
-	public List<Activity> findMonthlyActivity(Long accountId) {
+	public List<Activity> findMonthlyActivity(Long accountId, OffsetDateTime since) {
+		String period = since == null ? "" : " AND created_at >= ?";
+		List<Object> args = new ArrayList<>();
+		addPeriodArgs(args, accountId, since);
+		addPeriodArgs(args, accountId, since);
 		return jdbc.query("""
 				SELECT created_at,'puja' tipo FROM app_pujas_live WHERE cuenta_id=?
+				%s
 				UNION ALL
 				SELECT created_at,'compra' FROM app_compras WHERE cuenta_comprador_id=?
-				""", (rs, row) -> new Activity(rs.getObject("created_at", OffsetDateTime.class), rs.getString("tipo")),
-				accountId, accountId);
+				%s
+				""".formatted(period, period), (rs, row) -> new Activity(rs.getObject("created_at", OffsetDateTime.class),
+						rs.getString("tipo")), args.toArray());
+	}
+
+	private void addPeriodArgs(List<Object> args, Long accountId, OffsetDateTime since) {
+		args.add(accountId);
+		if (since != null) args.add(since);
 	}
 
 	private QueryFilter notificationFilter(Long accountId, String type, Boolean read) {
@@ -97,7 +137,7 @@ public class UsuarioQueryRepository {
 	}
 
 	public record StatisticsSnapshot(BigDecimal totalBid, BigDecimal totalPaid, int bids, int purchases, int auctions,
-			int wins) {
+			int wins, int consignments, int soldConsignments, int liquidatedConsignments, BigDecimal totalLiquidated) {
 	}
 
 	public record Activity(OffsetDateTime createdAt, String type) {

@@ -94,3 +94,21 @@ Privado:
 ## Alternativa simple
 
 Si WebSocket se complica, implementar polling para datos no críticos, pero **las pujas deberían usar WebSocket o al menos control transaccional fuerte con refresh frecuente**. La recomendación principal sigue siendo WebSocket.
+
+---
+
+## Addendum post revisión realtime
+
+Eventos/timers recomendados:
+
+- `LOTE_CIERRE_PROGRAMADO`
+- `LOTE_CERRADO`
+- `PROXIMO_LOTE_PROGRAMADO`
+- `LOTE_ACTIVADO`
+- `SUBASTA_CIERRE_PROGRAMADO`
+- `SUBASTA_FINALIZADA`
+- `RESERVA_MEDIO_ACTIVA`
+- `RESERVA_MEDIO_LIBERADA`
+- `RESERVA_MEDIO_CONSUMIDA`
+
+Reglas finales: cierre automático de lote a 60 s sin superación, delay de 60 s antes del siguiente lote y delay de 120 s antes de finalizar subasta completa. Eventos frecuentes como puja superada deben priorizar WebSocket antes que notificación persistente.

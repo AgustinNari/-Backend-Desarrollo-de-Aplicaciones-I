@@ -48,6 +48,7 @@ public class ConsignmentController {
 	@PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
 	public ResponseEntity<ApiResponse<Detail>> create(Authentication authentication,
 			@RequestParam String segmento,
+			@RequestParam(required = false) String categoriaSubasta,
 			@RequestParam Boolean aceptaTyC,
 			@RequestParam Boolean declaracionPropiedadYOrigenLicito,
 			@RequestParam String titulo,
@@ -58,7 +59,7 @@ public class ConsignmentController {
 			@RequestParam(required = false) String autor,
 			@RequestParam(required = false) String historiaExtendida,
 			@RequestPart List<MultipartFile> fotos) {
-		Detail result = consignments.create(accountId(authentication), segmento, aceptaTyC,
+		Detail result = consignments.create(accountId(authentication), segmento, categoriaSubasta, aceptaTyC,
 				declaracionPropiedadYOrigenLicito, titulo, descripcion, historia, fechaAproximada,
 				esObraDeArte, autor, historiaExtendida, fotos);
 		return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(result, "Consignacion creada"));

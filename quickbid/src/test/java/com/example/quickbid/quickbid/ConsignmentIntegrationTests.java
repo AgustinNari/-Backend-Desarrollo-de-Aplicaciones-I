@@ -140,6 +140,36 @@ class ConsignmentIntegrationTests {
 		assertEquals(beforeOwners, count("SELECT COUNT(*) FROM duenios"));
 	}
 
+	@Test void altaRechazaMasDeQuinceFotos() throws Exception {
+		var request = multipart("/api/consignaciones");
+		params(request);
+		for (int i = 0; i < 16; i++) request.file(photo("fotos", i));
+
+		request(request, "oro@quickbid.demo").andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.errors[0].code").value("MAXIMUM_PHOTOS_EXCEEDED"));
+	}
+
+	@Test void segmentoYCategoriaSubastaQuedanSeparados() throws Exception {
+		var request = multipart("/api/consignaciones")
+				.param("segmento", "relojeria")
+				.param("categoriaSubasta", "oro")
+				.param("aceptaTyC", "true")
+				.param("declaracionPropiedadYOrigenLicito", "true")
+				.param("titulo", "Reloj demo")
+				.param("descripcion", "Descripcion demo");
+		for (int i = 0; i < 6; i++) request.file(photo("fotos", i));
+
+		String json = request(request, "oro@quickbid.demo").andExpect(status().isCreated())
+				.andExpect(jsonPath("$.data.segmento").value("relojeria"))
+				.andExpect(jsonPath("$.data.categoriaSubasta").value("oro"))
+				.andReturn().getResponse().getContentAsString();
+		Long id = ((Number) JsonPath.read(json, "$.data.id")).longValue();
+		assertEquals("relojeria",
+				jdbc.queryForObject("SELECT segmento FROM app_solicitudes_consignacion WHERE id=?", String.class, id));
+		assertEquals("oro",
+				jdbc.queryForObject("SELECT categoria_sugerida FROM app_solicitudes_consignacion WHERE id=?", String.class, id));
+	}
+
 	@Test void altaSinDeclaracionJuradaDevuelve400Uniforme() throws Exception {
 		var request = multipart("/api/consignaciones")
 				.param("segmento", "comun")
@@ -160,7 +190,7 @@ class ConsignmentIntegrationTests {
 				.file(pdf("facturaCompra", "..\\secret\\origen.pdf"))
 				.param("observaciones", "Factura demo"), "oro@quickbid.demo")
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.data.estado").value("documentacion_recibida"))
+				.andExpect(jsonPath("$.data.estado").value("pendiente_revision"))
 				.andExpect(jsonPath("$.data.documentosOrigen[0].estado").value("pendiente"))
 				.andExpect(jsonPath("$.data.documentosOrigen[0].filename").value("origen.pdf"))
 				.andReturn().getResponse().getContentAsString();
@@ -170,7 +200,7 @@ class ConsignmentIntegrationTests {
 		assertFalse(response.contains("checksum"));
 		assertFalse(response.contains("password"));
 		assertFalse(response.contains("token"));
-		assertEquals("documentacion_recibida",
+		assertEquals("pendiente_revision",
 				jdbc.queryForObject("SELECT estado FROM app_solicitudes_consignacion WHERE id=16001", String.class));
 
 		consignments.reviewOriginDocuments(16001L, 1002, true, null);
@@ -242,9 +272,28 @@ class ConsignmentIntegrationTests {
 				.andExpect(jsonPath("$.errors").isArray());
 		request(post("/api/consignaciones/" + id + "/acuerdo/aceptar")
 				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"leyoContrato\":false,\"aceptaClausulasPlazos\":true}"), "oro@quickbid.demo")
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.errors").isArray());
+		request(post("/api/consignaciones/" + id + "/acuerdo/aceptar")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"leyoContrato\":true,\"aceptaClausulasPlazos\":false}"), "oro@quickbid.demo")
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.errors").isArray());
+		request(post("/api/consignaciones/" + id + "/acuerdo/aceptar")
+				.contentType(MediaType.APPLICATION_JSON)
 				.content("{\"leyoContrato\":true,\"aceptaClausulasPlazos\":true}"), "aprobado@quickbid.demo")
 				.andExpect(status().isForbidden())
 				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_OWNED"));
+	}
+
+	@Test void acuerdoAceptadoCreaProductoYNoPermiteRechazoPosterior() throws Exception {
+		Long id = accepted();
+		assertNotNull(jdbc.queryForObject("SELECT producto_id FROM app_solicitudes_consignacion WHERE id=?",
+				Integer.class, id));
+		request(post("/api/consignaciones/" + id + "/acuerdo/rechazar"), "oro@quickbid.demo")
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_STATE_TRANSITION"));
 	}
 
 	@Test void rechazarAcuerdoProcesadoDevuelve409() throws Exception {
@@ -271,6 +320,23 @@ class ConsignmentIntegrationTests {
 				String.class, policy));
 	}
 
+	@Test void proponerAcuerdoExigeDuenioYPermiteVerificadorDistintoDelRevisor() {
+		Long id = create(3001L);
+		consignments.approveDigitalReview(id, 1002);
+		consignments.markPhysicalReception(id, 1002);
+		consignments.approvePhysicalReview(id, 1002);
+		assertCode("CONSIGNOR_NOT_VERIFIED",
+				() -> consignments.proposeAgreement(id, 1002, new BigDecimal("25000"), "ARS", null, null,
+						"Acuerdo demo"));
+
+		consignments.verifyConsignor(3001L, 1001, true, true, 2);
+		consignments.proposeAgreement(id, 1002, new BigDecimal("25000"), "ARS", null, null, "Acuerdo demo");
+		assertEquals(1001, jdbc.queryForObject("SELECT verificador FROM duenios WHERE identificador=2001",
+				Integer.class));
+		assertEquals(1002, jdbc.queryForObject("SELECT revisor_empleado_id FROM app_solicitudes_consignacion WHERE id=?",
+				Integer.class, id));
+	}
+
 	@Test void rechazoFisicoPermiteElegirEnvioYPagarlo() throws Exception {
 		Long id = rejectedReturn();
 		request(post("/api/consignaciones/" + id + "/devolucion").contentType(MediaType.APPLICATION_JSON)
@@ -291,6 +357,10 @@ class ConsignmentIntegrationTests {
 		assertEquals("pendiente_entrega", jdbc.queryForObject("""
 				SELECT estado FROM app_consignacion_devoluciones WHERE solicitud_id=?
 				""", String.class, id));
+		assertEquals(1, count("""
+				SELECT COUNT(*) FROM app_documentos
+				WHERE referencia_tipo='consignacion' AND referencia_id=? AND tipo='comprobante_envio_devolucion'
+				""", id));
 	}
 
 	@Test void devolucionYPagoEnvioConRecursosInvalidosDevuelvenErroresUniformes() throws Exception {
@@ -355,13 +425,41 @@ class ConsignmentIntegrationTests {
 
 	@Test void liquidacionSeGeneraUnaSolaVez() {
 		jdbc.update("UPDATE app_medios_pago SET estado='rechazado',verificado_hasta=DATEADD('DAY',-1,CURRENT_TIMESTAMP) WHERE id=5006");
+		jdbc.update("""
+				UPDATE app_solicitudes_consignacion
+				SET comision_comprador_pct=10,comision_vendedor_pct=15
+				WHERE id=16007
+				""");
 		var liquidation = consignments.liquidate(16007L, 1002, 5006L);
-		assertEquals(new BigDecimal("85500.00"), liquidation.montoNeto());
+		assertEquals(new BigDecimal("14250.00"), liquidation.comision());
+		assertEquals(new BigDecimal("80750.00"), liquidation.montoNeto());
 		assertEquals("Cuenta bancaria registrada #5006", liquidation.cuentaDestino());
 		BusinessException exception = assertThrows(BusinessException.class,
 				() -> consignments.liquidate(16007L, 1002, 5006L));
 		assertEquals("LIQUIDATION_ALREADY_EXISTS", exception.getErrors().get(0).code());
 		assertEquals(1, count("SELECT COUNT(*) FROM app_liquidaciones_consignacion WHERE solicitud_id=16007"));
+		assertEquals(1, count("""
+				SELECT COUNT(*) FROM app_documentos
+				WHERE referencia_tipo='consignacion' AND referencia_id=16007 AND tipo='liquidacion_venta'
+				"""));
+	}
+
+	@Test void listadoSoportaFiltrosActivasRechazadasYVendidas() throws Exception {
+		request(get("/api/consignaciones?filtro=activas"), "oro@quickbid.demo")
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.content", hasSize(2)));
+		request(get("/api/consignaciones?filtro=vendidas"), "oro@quickbid.demo")
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.content", hasSize(1)))
+				.andExpect(jsonPath("$.data.content[0].id").value(16007));
+
+		Long rejected = rejectedReturn();
+		request(get("/api/consignaciones?filtro=rechazadas"), "oro@quickbid.demo")
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.content[0].id").value(rejected.intValue()));
+		request(get("/api/consignaciones?filtro=inexistente"), "oro@quickbid.demo")
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_FILTER"));
 	}
 
 	@Test void detalleAjenoEs403YEndpointSinTokenEs401Uniforme() throws Exception {
@@ -407,7 +505,7 @@ class ConsignmentIntegrationTests {
 	}
 
 	private Long create(Long accountId) {
-		return consignments.create(accountId, "comun", true, true, "Articulo demo", "Descripcion demo", null,
+		return consignments.create(accountId, "arte", "comun", true, true, "Articulo demo", "Descripcion demo", null,
 				"1980", false, null, null, photos()).id();
 	}
 
@@ -431,7 +529,7 @@ class ConsignmentIntegrationTests {
 	}
 
 	private void params(org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder builder) {
-		builder.param("segmento", "comun").param("aceptaTyC", "true")
+		builder.param("segmento", "arte").param("categoriaSubasta", "comun").param("aceptaTyC", "true")
 				.param("declaracionPropiedadYOrigenLicito", "true").param("titulo", "Articulo demo")
 				.param("descripcion", "Descripcion demo");
 	}

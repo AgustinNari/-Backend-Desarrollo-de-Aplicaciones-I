@@ -5,6 +5,7 @@ import java.math.RoundingMode;
 import java.sql.PreparedStatement;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -36,6 +37,13 @@ import com.example.quickbid.quickbid.websocket.PurchaseRealtimePublisher;
 @Service
 public class PurchaseService {
 	private static final BigDecimal FINE_RATE = new BigDecimal("0.10");
+	private static final int WINNING_BID_POINTS = 80;
+	private static final int EXTRAS_PAID_POINTS = 20;
+	private static final int NEXT_LOT_DELAY_SECONDS = 60;
+	private static final int AUCTION_CLOSE_DELAY_SECONDS = 120;
+	private static final Set<String> PURCHASE_STATES = Set.of("adjudicacion_pendiente", "multa_activa",
+			"pagos_extra_pendientes", "pagada", "entrega_pendiente", "retiro_pendiente",
+			"abandonada_por_incumplimiento_pago", "abandonada_por_incumplimiento_retiro", "completada");
 	private final JdbcTemplate jdbc;
 	private final CuentaAppRepository accounts;
 	private final CategoriaService categories;
@@ -46,14 +54,16 @@ public class PurchaseService {
 	private final DireccionEnvioRepository addresses;
 	private final BigDecimal shippingFlatCost;
 	private final int completedPoints;
-	private final int finePointsPenalty;
+	private final int fineGeneratedPointsPenalty;
+	private final int fineExpiredPointsPenalty;
 
 	public PurchaseService(JdbcTemplate jdbc, CuentaAppRepository accounts, CategoriaService categories,
 			AuditService audit, PurchaseRealtimePublisher realtime, MailNotificationService mail,
 			PurchaseReadRepository reads, DireccionEnvioRepository addresses,
 			@Value("${app.purchase.shipping-flat-cost:5000}") BigDecimal shippingFlatCost,
-			@Value("${app.purchase.completed-points:100}") int completedPoints,
-			@Value("${app.purchase.fine-points-penalty:100}") int finePointsPenalty) {
+			@Value("${app.purchase.completed-points:60}") int completedPoints,
+			@Value("${app.purchase.fine-generated-points-penalty:90}") int fineGeneratedPointsPenalty,
+			@Value("${app.purchase.fine-expired-points-penalty:250}") int fineExpiredPointsPenalty) {
 		this.jdbc = jdbc;
 		this.accounts = accounts;
 		this.categories = categories;
@@ -64,15 +74,17 @@ public class PurchaseService {
 		this.addresses = addresses;
 		this.shippingFlatCost = shippingFlatCost;
 		this.completedPoints = completedPoints;
-		this.finePointsPenalty = finePointsPenalty;
+		this.fineGeneratedPointsPenalty = fineGeneratedPointsPenalty;
+		this.fineExpiredPointsPenalty = fineExpiredPointsPenalty;
 	}
 
 	@Transactional(readOnly = true)
-	public Page<Summary> list(Long accountId, int page, int size) {
+	public Page<Summary> list(Long accountId, String state, int page, int size) {
 		account(accountId);
 		checkPage(page, size);
-		long total = reads.countByAccountId(accountId);
-		List<Summary> values = reads.findByAccountId(accountId, page, size);
+		String normalizedState = normalizedState(state);
+		long total = reads.countByAccountId(accountId, normalizedState);
+		List<Summary> values = reads.findByAccountId(accountId, normalizedState, page, size);
 		return new Page<>(values, page, size, total, (int) Math.ceil((double) total / size));
 	}
 
@@ -133,11 +145,16 @@ public class PurchaseService {
 	@Transactional
 	public Detail closeLot(Integer auctionId, PaymentOutcome outcome) {
 		LiveState live = lockLiveState(auctionId);
-		if (live.itemId() == null) throw conflict("El lote ya fue cerrado", "LOT_ALREADY_CLOSED");
+		if (live.itemId() == null) {
+			Long existing = latestPurchaseForAuction(auctionId);
+			if (existing != null) return internalDetail(existing);
+			throw conflict("El lote ya fue cerrado", "LOT_ALREADY_CLOSED");
+		}
 		Auction auction = auction(auctionId);
 		if (!auction.state().equals("en_vivo")) throw conflict("La subasta no esta en vivo", "AUCTION_NOT_LIVE");
 		Item item = item(live.itemId());
-		if (purchaseForItem(item.id())) throw conflict("El lote ya posee compra", "LOT_ALREADY_CLOSED");
+		Long existingPurchase = purchaseForItem(item.id());
+		if (existingPurchase != null) return internalDetail(existingPurchase);
 		WinningBid winning = winningBid(auctionId, item.id());
 		Long purchaseId;
 		Long buyerAccountId = null;
@@ -145,8 +162,9 @@ public class PurchaseService {
 		BigDecimal amount;
 		if (winning == null) {
 			amount = item.basePrice();
+			Commissions commissions = commissions(item, amount, true);
 			purchaseId = insertPurchase(auctionId, item, null, true, null, amount, auction.currency(), null,
-					"pagos_extra_pendientes");
+					"pagos_extra_pendientes", commissions);
 			updateConsignment(item.id(), "comprada_por_empresa");
 		} else {
 			buyerAccountId = winning.accountId();
@@ -157,18 +175,17 @@ public class PurchaseService {
 			jdbc.update("UPDATE app_pujas_live SET estado='ganadora' WHERE id=?", winning.id());
 			jdbc.update("UPDATE pujos SET ganador='no' WHERE item=?", item.id());
 			jdbc.update("UPDATE pujos SET ganador='si' WHERE identificador=?", winning.legacyBidId());
+			Commissions commissions = commissions(item, winning.amount(), false);
 			purchaseId = insertPurchase(auctionId, item, winning.accountId(), false, winning.id(), winning.amount(),
-					auction.currency(), winning.paymentId(), "adjudicacion_pendiente");
-			registerLegacySale(auctionId, item, winning);
+					auction.currency(), winning.paymentId(), "adjudicacion_pendiente", commissions);
+			registerLegacySale(auctionId, item, winning, commissions.seller());
 			updateConsignment(item.id(), "vendida");
+			categories.addPoints(account(winning.accountId()), WINNING_BID_POINTS, "puja_ganada", "puja", winning.id());
 			automaticAdjudicationPayment(purchaseId, winning, auction.currency(), outcome);
 		}
 		jdbc.update("UPDATE \"itemsCatalogo\" SET subastado='si' WHERE identificador=?", item.id());
 		long nextVersion = live.version() + 1;
-		jdbc.update("""
-				UPDATE app_subasta_estado_vivo SET item_catalogo_activo_id=NULL,version=?,updated_at=CURRENT_TIMESTAMP
-				WHERE subasta_id=?
-				""", nextVersion, auctionId);
+		scheduleAfterLotClose(auctionId, nextVersion);
 		notifyOwner(item.id(), purchaseId);
 		audit.record(new AuditEvent("sistema", null, "subasta.lote_cerrado", "compra", purchaseId,
 				"{\"subastaId\":" + auctionId + ",\"itemId\":" + item.id() + "}"));
@@ -221,10 +238,19 @@ public class PurchaseService {
 		jdbc.update("UPDATE app_multas SET estado='vencida' WHERE id=?", fineId);
 		CuentaApp account = account(fine.accountId());
 		account.changeState("bloqueada_permanente");
-		categories.addPoints(account, -finePointsPenalty, "multa_vencida", "multa", fineId);
+		categories.addPoints(account, -fineExpiredPointsPenalty, "multa_vencida", "multa", fineId);
 		notify(fine.accountId(), "multa_vencida", "Cuenta bloqueada",
 				"La multa vencio y la cuenta quedo bloqueada permanentemente.", "multa", fineId);
 		audit.record(new AuditEvent("sistema", null, "multa.vencida", "multa", fineId, "{}"));
+	}
+
+	@Transactional
+	public int expireDueFines() {
+		List<Long> due = jdbc.query("""
+				SELECT id FROM app_multas WHERE estado='pendiente' AND vence_at<=CURRENT_TIMESTAMP ORDER BY vence_at,id
+				""", (rs, row) -> rs.getLong(1));
+		due.forEach(id -> expireFine(id, false));
+		return due.size();
 	}
 
 	@Transactional
@@ -236,6 +262,7 @@ public class PurchaseService {
 		jdbc.update("UPDATE app_compras SET estado='pagos_extra_pendientes',updated_at=CURRENT_TIMESTAMP WHERE id=?",
 				purchaseId);
 		if (pendingFineCount(fine.accountId()) == 0) account(fine.accountId()).changeState("activa");
+		createDocument(purchaseId, "recibo_multa", "recibo-multa-" + fineId + ".pdf");
 		notify(fine.accountId(), "multa_pagada", "Multa pagada",
 				"La restriccion por multa fue regularizada manualmente.", "multa", fineId);
 		audit.record(new AuditEvent("admin", null, "multa.marcada_pagada", "multa", fineId, "{}"));
@@ -264,6 +291,17 @@ public class PurchaseService {
 				"{\"estado\":\"" + state + "\"}"));
 	}
 
+	@Transactional
+	public int abandonDueExtraPayments() {
+		List<Long> due = jdbc.query("""
+				SELECT id FROM app_compras
+				WHERE estado='pagos_extra_pendientes' AND updated_at<=?
+				ORDER BY updated_at,id
+				""", (rs, row) -> rs.getLong(1), OffsetDateTime.now().minusHours(72));
+		due.forEach(id -> abandon(id, false));
+		return due.size();
+	}
+
 	private void automaticAdjudicationPayment(Long purchaseId, WinningBid winning, String currency,
 			PaymentOutcome outcome) {
 		boolean success = paymentSucceeds(winning.accountId(), winning.paymentId(), currency, winning.amount(), outcome);
@@ -271,7 +309,7 @@ public class PurchaseService {
 				success ? "aprobado" : "rechazado", "auto-adjudicacion-" + purchaseId,
 				success ? null : "INSUFFICIENT_FUNDS_OR_LIMIT");
 		if (success) {
-			consume(winning.paymentId(), winning.amount());
+			consumeReservation(winning.id(), winning.paymentId(), winning.amount());
 			jdbc.update("UPDATE app_compras SET estado='pagos_extra_pendientes',updated_at=CURRENT_TIMESTAMP WHERE id=?",
 					purchaseId);
 			categories.addPoints(account(winning.accountId()), completedPoints, "compra_concretada", "compra", purchaseId);
@@ -279,11 +317,12 @@ public class PurchaseService {
 					"El monto adjudicado fue cobrado. Restan comision y entrega.", "compra", purchaseId);
 			audit.record(new AuditEvent("sistema", null, "pago.adjudicacion_aprobado", "pago", payment.id(), "{}"));
 		} else {
+			releaseReservation(winning.id());
 			Long fineId = createFine(winning.accountId(), purchaseId, winning.amount(), currency);
 			jdbc.update("UPDATE app_compras SET estado='multa_activa',updated_at=CURRENT_TIMESTAMP WHERE id=?", purchaseId);
 			CuentaApp account = account(winning.accountId());
 			account.changeState("restriccion_multa");
-			categories.addPoints(account, -finePointsPenalty, "multa_generada", "multa", fineId);
+			categories.addPoints(account, -fineGeneratedPointsPenalty, "multa_generada", "multa", fineId);
 			notify(winning.accountId(), "multa_generada", "Multa pendiente",
 					"El cobro automatico fallo. Debes pagar obligacion y multa dentro de 72 horas.", "multa", fineId);
 			audit.record(new AuditEvent("sistema", null, "multa.generada", "multa", fineId,
@@ -302,15 +341,18 @@ public class PurchaseService {
 		if (activeFine(purchaseId) != null) throw conflict("La compra posee una multa activa", "FINE_PAYMENT_REQUIRED");
 		PurchaseDtos.Delivery delivery = delivery(purchaseId);
 		if (delivery == null) throw conflict("Primero debes elegir envio o retiro", "DELIVERY_SELECTION_REQUIRED");
-		BigDecimal amount = commission(purchase.itemId()).add(delivery.costoEnvio());
+		BigDecimal amount = purchase.buyerCommission().add(delivery.costoEnvio());
 		boolean success = paymentSucceeds(accountId, paymentId, purchase.currency(), amount, outcome);
 		Payment payment = insertPayment(purchaseId, null, paymentId, amount, purchase.currency(),
 				success ? "aprobado" : "rechazado", key, success ? null : "INSUFFICIENT_FUNDS_OR_LIMIT");
 		if (success) {
 			consume(paymentId, amount);
+			freezeDeliveryAddress(purchaseId);
 			String nextState = delivery.tipo().equals("envio") ? "entrega_pendiente" : "retiro_pendiente";
 			jdbc.update("UPDATE app_entregas SET estado='pagada',updated_at=CURRENT_TIMESTAMP WHERE compra_id=?", purchaseId);
 			jdbc.update("UPDATE app_compras SET estado=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", nextState, purchaseId);
+			categories.addPoints(account(accountId), EXTRAS_PAID_POINTS, "extras_pagados", "compra", purchaseId);
+			createDocument(purchaseId, "factura_compra", "factura-compra-" + purchaseId + ".pdf");
 			notify(accountId, nextState, nextState.equals("entrega_pendiente") ? "Entrega pendiente" : "Retiro pendiente",
 					"El pago de extras fue aprobado.", "compra", purchaseId);
 		}
@@ -338,6 +380,7 @@ public class PurchaseService {
 			jdbc.update("UPDATE app_compras SET estado='pagos_extra_pendientes',updated_at=CURRENT_TIMESTAMP WHERE id=?",
 					purchaseId);
 			if (pendingFineCount(accountId) == 0) account(accountId).changeState("activa");
+			createDocument(purchaseId, "recibo_multa", "recibo-multa-" + fine.id() + ".pdf");
 			notify(accountId, "multa_pagada", "Multa pagada", "La restriccion por multa fue regularizada.", "multa",
 					fine.id());
 			audit.record(new AuditEvent("usuario", accountId, "multa.pagada", "multa", fine.id(), "{}"));
@@ -359,7 +402,10 @@ public class PurchaseService {
 		}
 		if (outcome == PaymentOutcome.FAILURE) return false;
 		if (outcome == PaymentOutcome.SUCCESS) return true;
-		if (method.limit() != null && amount.compareTo(method.limit().subtract(method.consumed())) > 0) return false;
+		if (method.limit() == null
+				|| amount.compareTo(method.limit().subtract(method.consumed()).subtract(activeReservations(paymentId))) > 0) {
+			return false;
+		}
 		return !method.type().equals("cheque_certificado")
 				|| method.guarantee() != null && amount.compareTo(method.guarantee()) <= 0;
 	}
@@ -441,11 +487,11 @@ public class PurchaseService {
 	}
 
 	private Long insertPurchase(Integer auctionId, Item item, Long accountId, boolean company, Long bidId,
-			BigDecimal amount, String currency, Long paymentId, String state) {
+			BigDecimal amount, String currency, Long paymentId, String state, Commissions commissions) {
 		return insert("""
 				INSERT INTO app_compras(subasta_id,item_catalogo_id,producto_id,cuenta_comprador_id,comprador_empresa,
-					puja_id,monto_adjudicacion,moneda,estado,medio_pago_id)
-				VALUES (?,?,?,?,?,?,?,?,?,?)
+					puja_id,monto_adjudicacion,moneda,estado,medio_pago_id,comision_comprador,comision_vendedor)
+				VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
 				""", statement -> {
 			statement.setInt(1, auctionId);
 			statement.setInt(2, item.id());
@@ -457,10 +503,12 @@ public class PurchaseService {
 			statement.setString(8, currency);
 			statement.setString(9, state);
 			if (paymentId == null) statement.setNull(10, java.sql.Types.BIGINT); else statement.setLong(10, paymentId);
+			statement.setBigDecimal(11, commissions.buyer());
+			statement.setBigDecimal(12, commissions.seller());
 		});
 	}
 
-	private void registerLegacySale(Integer auctionId, Item item, WinningBid winning) {
+	private void registerLegacySale(Integer auctionId, Item item, WinningBid winning, BigDecimal sellerCommission) {
 		List<LegacySale> sales = jdbc.query("""
 				SELECT p.duenio,c.cliente_id FROM productos p JOIN app_cuentas c ON c.id=?
 				WHERE p.identificador=? AND p.duenio IS NOT NULL
@@ -471,13 +519,66 @@ public class PurchaseService {
 			jdbc.update("""
 					INSERT INTO "registroDeSubasta"(subasta,duenio,producto,cliente,importe,comision)
 					VALUES (?,?,?,?,?,?)
-					""", auctionId, sale.ownerId(), item.productId(), sale.clientId(), winning.amount(), item.commission());
+					""", auctionId, sale.ownerId(), item.productId(), sale.clientId(), winning.amount(), sellerCommission);
 		}
 	}
 
 	private void consume(Long paymentId, BigDecimal amount) {
 		jdbc.update("UPDATE app_medios_pago SET consumo_actual=consumo_actual+?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
 				amount, paymentId);
+	}
+
+	private void consumeReservation(Long bidId, Long paymentId, BigDecimal amount) {
+		List<Reservation> values = jdbc.query("""
+				SELECT id,estado FROM app_reservas_medio_pago WHERE puja_id=? FOR UPDATE
+				""", (rs, row) -> new Reservation(rs.getLong("id"), rs.getString("estado")), bidId);
+		if (values.isEmpty()) {
+			consume(paymentId, amount);
+			return;
+		}
+		Reservation reservation = values.get(0);
+		if (reservation.state().equals("consumida")) return;
+		if (reservation.state().equals("activa")) {
+			jdbc.update("""
+					UPDATE app_reservas_medio_pago
+					SET estado='consumida',consumed_at=CURRENT_TIMESTAMP
+					WHERE id=? AND estado='activa'
+					""", reservation.id());
+			consume(paymentId, amount);
+		}
+	}
+
+	private void releaseReservation(Long bidId) {
+		jdbc.update("""
+				UPDATE app_reservas_medio_pago
+				SET estado='liberada',released_at=CURRENT_TIMESTAMP
+				WHERE puja_id=? AND estado='activa'
+				""", bidId);
+	}
+
+	private BigDecimal activeReservations(Long paymentId) {
+		BigDecimal value = jdbc.queryForObject("""
+				SELECT COALESCE(SUM(monto),0) FROM app_reservas_medio_pago
+				WHERE medio_pago_id=? AND estado='activa'
+				""", BigDecimal.class, paymentId);
+		return value == null ? BigDecimal.ZERO : value;
+	}
+
+	private void scheduleAfterLotClose(Integer auctionId, long nextVersion) {
+		OffsetDateTime now = OffsetDateTime.now();
+		Integer remaining = jdbc.queryForObject("""
+				SELECT COUNT(*) FROM "itemsCatalogo" i
+				JOIN catalogos c ON c.identificador=i.catalogo
+				WHERE c.subasta=? AND i.subastado='no'
+				""", Integer.class, auctionId);
+		OffsetDateTime nextLotAt = remaining != null && remaining > 0 ? now.plusSeconds(NEXT_LOT_DELAY_SECONDS) : null;
+		OffsetDateTime closeAuctionAt = remaining == null || remaining == 0 ? now.plusSeconds(AUCTION_CLOSE_DELAY_SECONDS) : null;
+		jdbc.update("""
+				UPDATE app_subasta_estado_vivo
+				SET item_catalogo_activo_id=NULL,version=?,lote_finaliza_estimado_at=NULL,
+					proximo_lote_programado_at=?,subasta_finaliza_programado_at=?,updated_at=CURRENT_TIMESTAMP
+				WHERE subasta_id=?
+				""", nextVersion, nextLotAt, closeAuctionAt, auctionId);
 	}
 
 	private void updateConsignment(Integer itemId, String state) {
@@ -526,6 +627,36 @@ public class PurchaseService {
 				.orElseThrow(() -> unprocessable("Direccion de envio requerida", "SHIPPING_ADDRESS_REQUIRED"));
 	}
 
+	private void freezeDeliveryAddress(Long purchaseId) {
+		PurchaseDtos.Delivery delivery = delivery(purchaseId);
+		if (delivery == null || !delivery.tipo().equals("envio") || delivery.direccionEnvioId() == null
+				|| delivery.direccionSnapshotJson() != null) {
+			return;
+		}
+		String snapshot = jdbc.query("""
+				SELECT alias,destinatario,calle,numero,piso,codigo_postal,localidad,provincia,pais,telefono
+				FROM app_direcciones_envio WHERE id=?
+				""", rs -> {
+			if (!rs.next()) throw unprocessable("Direccion de envio requerida", "SHIPPING_ADDRESS_REQUIRED");
+			return "{"
+					+ json("alias", rs.getString("alias")) + ","
+					+ json("destinatario", rs.getString("destinatario")) + ","
+					+ json("calle", rs.getString("calle")) + ","
+					+ json("numero", rs.getString("numero")) + ","
+					+ json("piso", rs.getString("piso")) + ","
+					+ json("codigoPostal", rs.getString("codigo_postal")) + ","
+					+ json("localidad", rs.getString("localidad")) + ","
+					+ json("provincia", rs.getString("provincia")) + ","
+					+ json("pais", rs.getString("pais")) + ","
+					+ json("telefono", rs.getString("telefono")) + "}";
+		}, delivery.direccionEnvioId());
+		jdbc.update("""
+				UPDATE app_entregas
+				SET direccion_snapshot_json=?,direccion_snapshot_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
+				WHERE compra_id=?
+				""", snapshot, purchaseId);
+	}
+
 	private Detail internalDetail(Long purchaseId) {
 		return detail(lockPurchase(purchaseId));
 	}
@@ -533,16 +664,18 @@ public class PurchaseService {
 	private Detail detail(Purchase purchase) {
 		return new Detail(purchase.id(), purchase.auctionId(), purchase.itemId(), purchase.productId(), purchase.bidId(),
 				purchase.amount(), purchase.currency(), purchase.state(), purchase.paymentId(), delivery(purchase.id()),
-				fine(purchase.id()), commission(purchase.itemId()), purchase.createdAt());
+				fine(purchase.id()), purchase.buyerCommission(), purchase.sellerCommission(), purchase.createdAt());
 	}
 
 	private PurchaseDtos.Delivery delivery(Long purchaseId) {
 		List<PurchaseDtos.Delivery> values = jdbc.query("""
-				SELECT id,tipo,direccion_envio_id,costo_envio,estado,perdio_cobertura_seguro
+				SELECT id,tipo,direccion_envio_id,costo_envio,estado,perdio_cobertura_seguro,
+				       direccion_snapshot_json,direccion_snapshot_at
 				FROM app_entregas WHERE compra_id=?
 				""", (rs, row) -> new PurchaseDtos.Delivery(rs.getLong("id"), rs.getString("tipo"),
 						(Long) rs.getObject("direccion_envio_id"), rs.getBigDecimal("costo_envio"), rs.getString("estado"),
-						rs.getBoolean("perdio_cobertura_seguro")), purchaseId);
+						rs.getBoolean("perdio_cobertura_seguro"), rs.getString("direccion_snapshot_json"),
+						rs.getObject("direccion_snapshot_at", OffsetDateTime.class)), purchaseId);
 		return values.isEmpty() ? null : values.get(0);
 	}
 
@@ -574,13 +707,14 @@ public class PurchaseService {
 	private Purchase purchase(Long purchaseId, String suffix) {
 		List<Purchase> values = jdbc.query("""
 				SELECT id,subasta_id,item_catalogo_id,producto_id,cuenta_comprador_id,comprador_empresa,puja_id,
-				       monto_adjudicacion,moneda,estado,medio_pago_id,created_at
+				       monto_adjudicacion,moneda,estado,medio_pago_id,comision_comprador,comision_vendedor,created_at
 				FROM app_compras WHERE id=?
 				""" + suffix, (rs, row) -> new Purchase(rs.getLong("id"), rs.getInt("subasta_id"),
 						rs.getInt("item_catalogo_id"), rs.getInt("producto_id"), (Long) rs.getObject("cuenta_comprador_id"),
 						rs.getBoolean("comprador_empresa"), (Long) rs.getObject("puja_id"),
 						rs.getBigDecimal("monto_adjudicacion"), rs.getString("moneda"), rs.getString("estado"),
-						(Long) rs.getObject("medio_pago_id"), rs.getObject("created_at", OffsetDateTime.class)),
+						(Long) rs.getObject("medio_pago_id"), rs.getBigDecimal("comision_comprador"),
+						rs.getBigDecimal("comision_vendedor"), rs.getObject("created_at", OffsetDateTime.class)),
 				purchaseId);
 		if (values.isEmpty()) throw notFound("Compra inexistente");
 		return values.get(0);
@@ -637,12 +771,64 @@ public class PurchaseService {
 		return values.get(0);
 	}
 
-	private BigDecimal commission(Integer itemId) {
-		return item(itemId).commission();
+	private Commissions commissions(Item item, BigDecimal amount, boolean company) {
+		BigDecimal buyer = commissionFor(item, amount);
+		BigDecimal seller = sellerCommissionFor(item, amount, buyer);
+		return new Commissions(company ? BigDecimal.ZERO.setScale(2) : buyer, seller);
 	}
 
-	private boolean purchaseForItem(Integer itemId) {
-		return jdbc.queryForObject("SELECT COUNT(*) FROM app_compras WHERE item_catalogo_id=?", Integer.class, itemId) > 0;
+	private BigDecimal commissionFor(Item item, BigDecimal amount) {
+		if (item.basePrice().signum() == 0) return BigDecimal.ZERO.setScale(2);
+		return amount.multiply(item.commission()).divide(item.basePrice(), 2, RoundingMode.HALF_UP);
+	}
+
+	private BigDecimal sellerCommissionFor(Item item, BigDecimal amount, BigDecimal legacyFallback) {
+		List<BigDecimal> percentages = jdbc.query("""
+				SELECT comision_vendedor_pct FROM app_solicitudes_consignacion
+				WHERE item_catalogo_id=? AND comision_vendedor_pct IS NOT NULL
+				ORDER BY id DESC LIMIT 1
+				""", (rs, row) -> rs.getBigDecimal(1), item.id());
+		if (percentages.isEmpty()) return legacyFallback;
+		return amount.multiply(percentages.get(0)).divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+	}
+
+	private void createDocument(Long purchaseId, String type, String filename) {
+		long fileId = insert("""
+				INSERT INTO app_archivos(tipo_contexto,filename_original,content_type,size_bytes,storage_path,checksum)
+				VALUES ('documento_compra',?,'application/pdf',0,?,?)
+				""", statement -> {
+			statement.setString(1, filename);
+			statement.setString(2, "generated/purchases/" + purchaseId + "/" + filename);
+			statement.setString(3, "generated-" + type + "-" + purchaseId + "-" + UUID.randomUUID());
+		});
+		jdbc.update("""
+				INSERT INTO app_documentos(tipo,referencia_tipo,referencia_id,archivo_id,estado)
+				VALUES (?,'compra',?,?,'disponible')
+				""", type, purchaseId, fileId);
+	}
+
+	private String json(String field, String value) {
+		if (value == null) return "\"" + field + "\":null";
+		return "\"" + field + "\":\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+	}
+
+	private String normalizedState(String state) {
+		if (state == null || state.isBlank()) return null;
+		String value = state.trim().toLowerCase();
+		if (!PURCHASE_STATES.contains(value)) throw unprocessable("Estado de compra invalido", "INVALID_FILTER");
+		return value;
+	}
+
+	private Long purchaseForItem(Integer itemId) {
+		List<Long> values = jdbc.query("SELECT id FROM app_compras WHERE item_catalogo_id=? ORDER BY id DESC LIMIT 1",
+				(rs, row) -> rs.getLong(1), itemId);
+		return values.isEmpty() ? null : values.get(0);
+	}
+
+	private Long latestPurchaseForAuction(Integer auctionId) {
+		List<Long> values = jdbc.query("SELECT id FROM app_compras WHERE subasta_id=? ORDER BY id DESC LIMIT 1",
+				(rs, row) -> rs.getLong(1), auctionId);
+		return values.isEmpty() ? null : values.get(0);
 	}
 
 	private WinningBid winningBid(Integer auctionId, Integer itemId) {
@@ -708,7 +894,10 @@ public class PurchaseService {
 
 	private record Purchase(Long id, Integer auctionId, Integer itemId, Integer productId, Long accountId,
 			Boolean company, Long bidId, BigDecimal amount, String currency, String state, Long paymentId,
-			OffsetDateTime createdAt) {
+			BigDecimal buyerCommission, BigDecimal sellerCommission, OffsetDateTime createdAt) {
+	}
+
+	private record Commissions(BigDecimal buyer, BigDecimal seller) {
 	}
 
 	private record FineRow(Long id, Long accountId, BigDecimal amount, String state, OffsetDateTime expiresAt) {
@@ -719,5 +908,8 @@ public class PurchaseService {
 	}
 
 	private record ExistingPayment(Long id, Long accountId) {
+	}
+
+	private record Reservation(Long id, String state) {
 	}
 }

@@ -153,3 +153,14 @@ Para endpoints protegidos:
 ## 12. Notificaciones
 
 Cada cambio de estado importante debe crear una notificación persistida y, si el usuario está conectado, emitir evento realtime.
+
+---
+
+## Addendum post revisión de flujos
+
+- Login de `bloqueada_permanente`: limitado a pantalla informativa, sin navegación real.
+- Inscripción: cierra 60 minutos antes, acepta medio pendiente/verificado/vencido, permite reintento si fue rechazada, no crea asistencia.
+- Puja: `idempotencyKey` obligatorio, prohibido producto propio, reserva límite mientras es mejor oferta, libera reserva al ser superada y consume al ganar final.
+- Cierre de lote: 60 segundos sin superación; luego 60 segundos hasta próximo lote; si era último lote, 120 segundos hasta finalizar subasta.
+- Compras: comisión comprador/vendedor sobre precio final ofertado; compra empresa al precio base sin comisión comprador.
+- Consignación: 6 a 15 fotos; documentación de origen vuelve a revisión manual; producto legacy solo al aceptar acuerdo; `duenio` obligatorio antes de proponer acuerdo.

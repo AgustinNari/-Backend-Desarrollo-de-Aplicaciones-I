@@ -14,11 +14,11 @@ public final class PurchaseDtos {
 
 	public record Detail(Long id, Integer subastaId, Integer itemCatalogoId, Integer productoId, Long pujaId,
 			BigDecimal montoAdjudicacion, String moneda, String estado, Long medioPagoId, Delivery entrega,
-			Fine multa, BigDecimal comisionComprador, OffsetDateTime createdAt) {
+			Fine multa, BigDecimal comisionComprador, BigDecimal comisionVendedor, OffsetDateTime createdAt) {
 	}
 
 	public record Delivery(Long id, String tipo, Long direccionEnvioId, BigDecimal costoEnvio, String estado,
-			Boolean perdioCoberturaSeguro) {
+			Boolean perdioCoberturaSeguro, String direccionSnapshotJson, OffsetDateTime direccionSnapshotAt) {
 	}
 
 	public record Fine(Long id, BigDecimal monto, String moneda, String estado, OffsetDateTime venceAt,

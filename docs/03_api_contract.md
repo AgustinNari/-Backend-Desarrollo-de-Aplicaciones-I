@@ -1,3 +1,6 @@
+> **Contrato base/original:** para implementación actual y frontend, usar `docs/API_CONTRATO_FINAL.md`. Si hay contradicción, prevalece `API_CONTRATO_FINAL.md`.
+
+
 # 03 — Contrato de API
 
 ## Convenciones generales

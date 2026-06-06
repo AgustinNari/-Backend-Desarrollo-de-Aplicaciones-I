@@ -77,6 +77,15 @@ class BidIntegrationTests {
 				.andExpect(jsonPath("$.errors[0].field").exists());
 	}
 
+	@Test void idempotencyKeyEsObligatoria() throws Exception {
+		authBid("aprobado@quickbid.demo", 6001, """
+				{"itemCatalogoId":9001,"monto":25300,"medioPagoId":5001,"clientStateVersion":1}
+				""")
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.errors").isArray());
+	}
+
 	@Test void subastaInexistenteDevuelve404Uniforme() throws Exception {
 		authBid("aprobado@quickbid.demo", 9999, bid(9001, "25300", 5001, 1, "missing-auction"))
 				.andExpect(status().isNotFound())
@@ -97,17 +106,24 @@ class BidIntegrationTests {
 	}
 
 	@Test void pujaValidaActualizaSnapshotAppLegacyAuditoriaYNotificacion() throws Exception {
-		authBid("aprobado@quickbid.demo", 6001, bid(9001, "25300", 5001, 1, "valid-normal"))
+		String response = authBid("aprobado@quickbid.demo", 6001, bid(9001, "25300", 5001, 1, "valid-normal"))
 				.andExpect(status().isCreated())
 				.andExpect(jsonPath("$.data.estado").value("aceptada"))
 				.andExpect(jsonPath("$.data.versionEstado").value(2))
 				.andExpect(jsonPath("$.data.secuencia").value(2))
-				.andExpect(jsonPath("$.data.numeroPostor").value(1));
+				.andExpect(jsonPath("$.data.numeroPostor").value(1))
+				.andReturn().getResponse().getContentAsString();
+		Long bidId = Long.valueOf(JsonPath.read(response, "$.data.id").toString());
 		assertEquals(2L, jdbc.queryForObject("SELECT version FROM app_subasta_estado_vivo WHERE subasta_id=6001", Long.class));
 		assertEquals("superada", jdbc.queryForObject("SELECT estado FROM app_pujas_live WHERE id=12501", String.class));
+		assertEquals("liberada", jdbc.queryForObject("SELECT estado FROM app_reservas_medio_pago WHERE puja_id=12501", String.class));
+		assertEquals("activa", jdbc.queryForObject("SELECT estado FROM app_reservas_medio_pago WHERE puja_id=?", String.class, bidId));
 		assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM pujos WHERE item=9001", Integer.class));
 		assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM app_auditoria WHERE accion='subasta.puja_aceptada'", Integer.class));
 		assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM app_notificaciones WHERE tipo='puja_aceptada' AND referencia_id<>12501", Integer.class));
+		assertEquals(901, jdbc.queryForObject("SELECT puntos FROM app_cuentas WHERE id=3001", Integer.class));
+		assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM app_movimientos_puntos WHERE motivo='puja_aceptada' AND referencia_id=?", Integer.class, bidId));
+		assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM app_subasta_estado_vivo WHERE subasta_id=6001 AND lote_finaliza_estimado_at IS NOT NULL", Integer.class));
 	}
 
 	@Test void versionObsoletaSeRechazaYAudita() throws Exception {
@@ -244,6 +260,11 @@ class BidIntegrationTests {
 				.andExpect(jsonPath("$.data.id").value(id))
 				.andExpect(jsonPath("$.data.idempotentReplay").value(true));
 		assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM app_pujas_live WHERE idempotency_key='repeatable-key'", Integer.class));
+		assertEquals(1, jdbc.queryForObject("""
+				SELECT COUNT(*) FROM app_reservas_medio_pago r
+				JOIN app_pujas_live p ON p.id=r.puja_id
+				WHERE p.idempotency_key='repeatable-key'
+				""", Integer.class));
 		authBid("aprobado@quickbid.demo", 6001, bid(9001, "25400", 5001, 2, "repeatable-key"))
 				.andExpect(status().isConflict())
 				.andExpect(jsonPath("$.errors[0].code").value("IDEMPOTENCY_CONFLICT"));

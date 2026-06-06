@@ -18,12 +18,12 @@ public final class ConsignmentDtos {
 			String accionPendiente, Long fotoPrincipalArchivoId, OffsetDateTime updatedAt) {
 	}
 
-	public record Detail(Long id, String titulo, String descripcion, String categoriaSugerida, String historia,
-			String artistaDisenador, String fechaObjeto, String estado, Boolean requiereDocumentacionOrigen,
-			String motivoRechazo, Integer productoId, Integer itemCatalogoId, Integer subastaId,
-			BigDecimal valorBase, String moneda, BigDecimal comisionCompradorPct, BigDecimal comisionVendedorPct,
-			BigDecimal netoEstimado, String acuerdoTexto, String ubicacionFisica, Policy poliza,
-			List<File> fotos, List<File> documentosOrigen, Return devolucion, Liquidation liquidacion,
+	public record Detail(Long id, String titulo, String descripcion, String segmento, String categoriaSubasta,
+			String categoriaSugerida, String historia, String artistaDisenador, String fechaObjeto, String estado,
+			Boolean requiereDocumentacionOrigen, String motivoRechazo, Integer productoId, Integer itemCatalogoId,
+			Integer subastaId, BigDecimal valorBase, String moneda, BigDecimal comisionCompradorPct,
+			BigDecimal comisionVendedorPct, BigDecimal netoEstimado, String acuerdoTexto, String ubicacionFisica,
+			Policy poliza, List<File> fotos, List<File> documentosOrigen, Return devolucion, Liquidation liquidacion,
 			OffsetDateTime createdAt, OffsetDateTime updatedAt) {
 	}
 

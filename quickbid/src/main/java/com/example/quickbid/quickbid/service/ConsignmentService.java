@@ -98,9 +98,9 @@ public class ConsignmentService {
 	}
 
 	@Transactional
-	public Detail create(Long accountId, String segment, Boolean acceptsTerms, Boolean ownershipDeclaration,
-			String title, String description, String history, String approximateDate, Boolean artwork, String author,
-			String extendedHistory, List<MultipartFile> photos) {
+	public Detail create(Long accountId, String segment, String auctionCategory, Boolean acceptsTerms,
+			Boolean ownershipDeclaration, String title, String description, String history, String approximateDate,
+			Boolean artwork, String author, String extendedHistory, List<MultipartFile> photos) {
 		CuentaApp account = accountAllowed(accountId);
 		if (!Boolean.TRUE.equals(acceptsTerms) || !Boolean.TRUE.equals(ownershipDeclaration)) {
 			throw bad("Debes aceptar terminos y declarar propiedad y origen licito", "CONSIGNMENT_DECLARATION_REQUIRED");
@@ -109,23 +109,25 @@ public class ConsignmentService {
 			throw forbidden("Faltan requisitos para consignar", "CONSIGNMENT_REQUIREMENTS_NOT_MET");
 		}
 		if (photos == null || photos.size() < 6) throw bad("Se requieren al menos seis fotos", "MINIMUM_PHOTOS_REQUIRED");
+		if (photos.size() > 15) throw bad("Se permite un maximo de quince fotos", "MAXIMUM_PHOTOS_EXCEEDED");
 		required(title, "titulo");
 		required(description, "descripcion");
-		String category = category(segment);
+		SegmentAndCategory classification = classify(segment, auctionCategory);
 		String completeHistory = join(history, extendedHistory);
 		long id = insert("""
-				INSERT INTO app_solicitudes_consignacion(cuenta_id,cliente_id,titulo,descripcion,categoria_sugerida,
+				INSERT INTO app_solicitudes_consignacion(cuenta_id,cliente_id,titulo,descripcion,segmento,categoria_sugerida,
 					historia,artista_disenador,fecha_objeto,declaracion_propiedad,acepta_devolucion_con_cargo,estado)
-				VALUES (?,?,?,?,?,?,?,?,true,true,'pendiente_revision')
+				VALUES (?,?,?,?,?,?,?,?,?,true,true,'pendiente_revision')
 				""", statement -> {
 			statement.setLong(1, accountId);
 			statement.setInt(2, account.getClienteId());
 			statement.setString(3, title.trim());
 			statement.setString(4, description.trim());
-			statement.setString(5, category);
-			statement.setString(6, completeHistory);
-			statement.setString(7, Boolean.TRUE.equals(artwork) ? blankToNull(author) : null);
-			statement.setString(8, blankToNull(approximateDate));
+			statement.setString(5, classification.segment());
+			statement.setString(6, classification.category());
+			statement.setString(7, completeHistory);
+			statement.setString(8, Boolean.TRUE.equals(artwork) ? blankToNull(author) : null);
+			statement.setString(9, blankToNull(approximateDate));
 		});
 		int order = 0;
 		for (MultipartFile photo : photos) {
@@ -155,7 +157,7 @@ public class ConsignmentService {
 					""", id, fileId);
 		}
 		jdbc.update("""
-				UPDATE app_solicitudes_consignacion SET estado='documentacion_recibida',
+				UPDATE app_solicitudes_consignacion SET estado='pendiente_revision',
 					requiere_documentacion_origen=true,updated_at=CURRENT_TIMESTAMP WHERE id=?
 				""", id);
 		audit.record(new AuditEvent("usuario", accountId, "consignacion.documentacion_origen_recibida", "consignacion", id,
@@ -289,6 +291,8 @@ public class ConsignmentService {
 				value.cost(), request.medioPagoId());
 		jdbc.update("UPDATE app_consignacion_devoluciones SET pago_id=?,estado='pendiente_entrega' WHERE id=?",
 				paymentId, value.id());
+		createGeneratedDocument(accountId, id, "comprobante_envio_devolucion",
+				"Comprobante de envio de devolucion #" + id);
 		audit(accountId, "consignacion.devolucion_envio_pagado", id);
 		return new ReturnPayment(paymentId, value.id(), request.medioPagoId(), value.cost(), value.currency(),
 				"aprobado", false);
@@ -309,11 +313,15 @@ public class ConsignmentService {
 	@Transactional
 	public void reviewOriginDocuments(Long id, Integer employeeId, boolean approved, String reason) {
 		Consignment value = lock(id);
-		if (!value.state().equals("documentacion_recibida")) throw invalidState();
+		if (!Set.of("pendiente_revision", "documentacion_recibida").contains(value.state())) throw invalidState();
+		if (count("SELECT COUNT(*) FROM app_consignacion_documentos_origen WHERE solicitud_id=? AND estado='pendiente'",
+				id) == 0) throw invalidState();
 		jdbc.update("UPDATE app_consignacion_documentos_origen SET estado=? WHERE solicitud_id=? AND estado='pendiente'",
 				approved ? "aprobado" : "rechazado", id);
 		if (approved) {
 			updateState(id, "recepcion_pendiente");
+			notify(value.accountId(), "consignacion_aprobada", "Consignacion aprobada",
+					"La revision documental fue aprobada y el bien puede avanzar a recepcion.", id);
 		} else {
 			rejectInitial(id, employeeId, reason);
 		}
@@ -326,6 +334,8 @@ public class ConsignmentService {
 		if (!value.state().equals("pendiente_revision")) throw invalidState();
 		jdbc.update("UPDATE app_solicitudes_consignacion SET estado='recepcion_pendiente',revisor_empleado_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
 				employeeId, id);
+		notify(value.accountId(), "consignacion_aprobada", "Consignacion aprobada",
+				"La revision inicial fue aprobada y el bien puede avanzar a recepcion.", id);
 		auditAdmin(employeeId, "consignacion.revision_digital_aprobada", id);
 	}
 
@@ -365,6 +375,8 @@ public class ConsignmentService {
 					revisor_empleado_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?
 				""", reason.trim(), employeeId, id);
 		createReturn(id, reason.trim());
+		notify(value.accountId(), "consignacion_rechazada", "Consignacion rechazada",
+				"La revision fisica fue rechazada. Debes gestionar la devolucion del bien.", id);
 		auditAdmin(employeeId, "consignacion.revision_fisica_rechazada", id);
 	}
 
@@ -486,19 +498,36 @@ public class ConsignmentService {
 		if (!value.state().equals("devolucion_pendiente")) throw invalidState();
 		updateState(id, "devolucion_incompleta");
 		jdbc.update("UPDATE app_consignacion_devoluciones SET estado='incumplida' WHERE solicitud_id=?", id);
+		notify(value.accountId(), "consignacion_devolucion_incumplida", "Devolucion vencida",
+				"La devolucion quedo marcada como incompleta por vencimiento del plazo.", id);
 		auditAdmin(employeeId, "consignacion.devolucion_incumplida", id);
+	}
+
+	@Transactional
+	public int expireDueReturns(Integer employeeId) {
+		List<Long> due = jdbc.query("""
+				SELECT s.id FROM app_solicitudes_consignacion s
+				JOIN app_consignacion_devoluciones d ON d.solicitud_id=s.id
+				WHERE s.estado='devolucion_pendiente'
+				  AND d.estado IN ('pendiente_decision','pendiente_retiro','pendiente_pago')
+				  AND d.created_at<=?
+				ORDER BY d.created_at,s.id
+				""", (rs, row) -> rs.getLong(1), OffsetDateTime.now().minusHours(72));
+		due.forEach(id -> markReturnIncomplete(id, employeeId));
+		return due.size();
 	}
 
 	private Detail detail(Consignment value) {
 		BigDecimal estimatedNet = value.baseValue() == null || value.sellerCommissionPct() == null ? null
 				: value.baseValue().subtract(value.baseValue().multiply(value.sellerCommissionPct())
 						.divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP));
-		return new Detail(value.id(), value.title(), value.description(), value.category(), value.history(), value.artist(),
-				value.objectDate(), value.state(), value.requiresDocuments(), value.rejectionReason(), value.productId(),
-				value.itemId(), value.auctionId(), value.baseValue(), value.currency(), value.buyerCommissionPct(),
-				value.sellerCommissionPct(), estimatedNet, value.agreementText(), value.location(), policy(value),
-				photos(value.id()), originDocuments(value.id()), returnDto(returnRow(value.id(), false)),
-				liquidationOrNull(value.id()), value.createdAt(), value.updatedAt());
+		return new Detail(value.id(), value.title(), value.description(), value.segment(), value.category(),
+				value.category(), value.history(), value.artist(), value.objectDate(), value.state(),
+				value.requiresDocuments(), value.rejectionReason(), value.productId(), value.itemId(), value.auctionId(),
+				value.baseValue(), value.currency(), value.buyerCommissionPct(), value.sellerCommissionPct(),
+				estimatedNet, value.agreementText(), value.location(), policy(value), photos(value.id()),
+				originDocuments(value.id()), returnDto(returnRow(value.id(), false)), liquidationOrNull(value.id()),
+				value.createdAt(), value.updatedAt());
 	}
 
 	private Consignment owned(Long accountId, Long id, boolean lock) {
@@ -524,9 +553,9 @@ public class ConsignmentService {
 				""" + suffix, (rs, row) -> new Consignment(rs.getLong("id"), rs.getLong("cuenta_id"),
 						rs.getInt("cliente_id"), (Integer) rs.getObject("owner_id"), (Integer) rs.getObject("producto_id"),
 						(Integer) rs.getObject("item_catalogo_id"), (Integer) rs.getObject("subasta_id"),
-						rs.getString("titulo"), rs.getString("descripcion"), rs.getString("categoria_sugerida"),
-						rs.getString("historia"), rs.getString("artista_disenador"), rs.getString("fecha_objeto"),
-						rs.getString("estado"), rs.getBoolean("requiere_documentacion_origen"),
+						rs.getString("titulo"), rs.getString("descripcion"), rs.getString("segmento"),
+						rs.getString("categoria_sugerida"), rs.getString("historia"), rs.getString("artista_disenador"),
+						rs.getString("fecha_objeto"), rs.getString("estado"), rs.getBoolean("requiere_documentacion_origen"),
 						rs.getString("motivo_rechazo"), (Integer) rs.getObject("revisor_empleado_id"),
 						rs.getBigDecimal("valor_base_propuesto"), rs.getString("moneda_propuesta"),
 						rs.getBigDecimal("comision_comprador_pct"), rs.getBigDecimal("comision_vendedor_pct"),
@@ -728,10 +757,13 @@ public class ConsignmentService {
 
 	private void rejectInitial(Long id, Integer employeeId, String reason) {
 		required(reason, "motivo");
+		Consignment value = lock(id);
 		jdbc.update("""
 				UPDATE app_solicitudes_consignacion SET estado='rechazo_inicial',motivo_rechazo=?,
 					revisor_empleado_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?
 				""", reason.trim(), employeeId, id);
+		notify(value.accountId(), "consignacion_rechazada", "Consignacion rechazada",
+				"La revision inicial fue rechazada. Revisa el motivo informado.", id);
 	}
 
 	private CuentaApp accountAllowed(Long id) {
@@ -784,10 +816,18 @@ public class ConsignmentService {
 		return jdbc.queryForObject(sql, Integer.class, args);
 	}
 
-	private String category(String value) {
-		if (value == null) return null;
-		String normalized = value.trim().toLowerCase();
-		return CATEGORIES.contains(normalized) ? normalized : null;
+	private SegmentAndCategory classify(String segment, String auctionCategory) {
+		required(segment, "segmento");
+		String normalizedSegment = segment.trim().toLowerCase();
+		String normalizedCategory = blankToNull(auctionCategory);
+		if (normalizedCategory == null) {
+			return CATEGORIES.contains(normalizedSegment)
+					? new SegmentAndCategory("general", normalizedSegment)
+					: new SegmentAndCategory(normalizedSegment, "comun");
+		}
+		normalizedCategory = normalizedCategory.toLowerCase();
+		if (!CATEGORIES.contains(normalizedCategory)) throw bad("Categoria de subasta invalida", "INVALID_CATEGORY");
+		return new SegmentAndCategory(normalizedSegment, normalizedCategory);
 	}
 
 	private String currency(String value) {
@@ -807,7 +847,8 @@ public class ConsignmentService {
 
 	private String filterPredicate(String filter) {
 		if (filter == null || filter.isBlank() || filter.equalsIgnoreCase("activas")) {
-			return "AND estado NOT IN ('rechazo_inicial','rechazo_revision_fisica','acuerdo_rechazado','devolucion_incompleta','liquidada')";
+			return "AND estado NOT IN ('rechazo_inicial','rechazo_revision_fisica','acuerdo_rechazado',"
+					+ "'devolucion_pendiente','devolucion_incompleta','vendida','comprada_por_empresa','liquidada')";
 		}
 		return switch (filter.toLowerCase()) {
 			case "rechazadas" -> "AND estado IN ('rechazo_inicial','rechazo_revision_fisica','acuerdo_rechazado','devolucion_pendiente','devolucion_incompleta')";
@@ -894,11 +935,14 @@ public class ConsignmentService {
 	}
 
 	private record Consignment(Long id, Long accountId, Integer clientId, Integer ownerId, Integer productId,
-			Integer itemId, Integer auctionId, String title, String description, String category, String history,
-			String artist, String objectDate, String state, Boolean requiresDocuments, String rejectionReason,
-			Integer reviewerId, BigDecimal baseValue, String currency, BigDecimal buyerCommissionPct,
-			BigDecimal sellerCommissionPct, String agreementText, String location, OffsetDateTime createdAt,
-			OffsetDateTime updatedAt) {
+			Integer itemId, Integer auctionId, String title, String description, String segment, String category,
+			String history, String artist, String objectDate, String state, Boolean requiresDocuments,
+			String rejectionReason, Integer reviewerId, BigDecimal baseValue, String currency,
+			BigDecimal buyerCommissionPct, BigDecimal sellerCommissionPct, String agreementText, String location,
+			OffsetDateTime createdAt, OffsetDateTime updatedAt) {
+	}
+
+	private record SegmentAndCategory(String segment, String category) {
 	}
 
 	private record ReturnRow(Long id, String modality, BigDecimal cost, String currency, String state, Long paymentId) {

@@ -3,7 +3,7 @@ import java.nio.charset.StandardCharsets; import java.security.*; import java.ti
 import org.springframework.beans.factory.annotation.Value; import org.springframework.stereotype.Service; import com.fasterxml.jackson.databind.ObjectMapper;
 @Service public class TokenService {
  private final byte[] secret; private final ObjectMapper json; private final SecureRandom random=new SecureRandom(); private final int accessMinutes;
- public TokenService(@Value("${app.jwt.secret}") String secret,@Value("${app.jwt.access-token-minutes:30}") int minutes){
+ public TokenService(@Value("${app.jwt.secret}") String secret,@Value("${app.jwt.access-token-minutes:15}") int minutes){
   if(secret.length()<32) throw new IllegalArgumentException("APP_JWT_SECRET must contain at least 32 characters"); this.secret=secret.getBytes(StandardCharsets.UTF_8);this.accessMinutes=minutes;this.json=new ObjectMapper();
  }
  public String access(Long id,String email,String estado){try{

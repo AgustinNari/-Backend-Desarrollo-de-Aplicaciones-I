@@ -1,3 +1,6 @@
+> **Fuente final:** para decisiones finales usar `docs/00_decisiones_finales.md`, `docs/API_CONTRATO_FINAL.md` y `docs/10_plan_correcciones_backend.md`. Si este README contradice esos archivos, debe actualizarse.
+
+
 # QuickBid Backend — README para implementación con Codex
 
 ## Qué se debe construir
