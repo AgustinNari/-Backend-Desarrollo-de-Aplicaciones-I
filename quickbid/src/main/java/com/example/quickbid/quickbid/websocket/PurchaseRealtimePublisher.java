@@ -32,7 +32,10 @@ public class PurchaseRealtimePublisher {
 	public void publish(LotClosedEvent event, Long buyerAccountId) {
 		messages.convertAndSend("/topic/subastas/" + event.subastaId() + "/estado", event);
 		if (buyerAccountId != null) {
-			messages.convertAndSendToUser(buyerAccountId.toString(), "/queue/notificaciones", event);
+			messages.convertAndSendToUser(buyerAccountId.toString(), "/queue/notificaciones",
+					new LotClosedEvent("LOTE_GANADO", event.subastaId(), event.itemCatalogoId(), event.compraId(),
+							event.pujaGanadoraId(), event.montoAdjudicacion(), event.moneda(), event.compradorEmpresa(),
+							event.versionEstado()));
 		}
 	}
 }

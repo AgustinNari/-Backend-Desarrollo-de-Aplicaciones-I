@@ -13,6 +13,7 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 import com.example.quickbid.quickbid.dto.response.SubastaDtos.Bid;
 import com.example.quickbid.quickbid.dto.response.SubastaDtos.BidEvent;
+import com.example.quickbid.quickbid.dto.response.SubastaDtos.RejectedBidEvent;
 import com.example.quickbid.quickbid.websocket.BidRealtimePublisher;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -30,7 +31,7 @@ class BidRealtimePublisherTests {
 		BidEvent acceptedEvent = new BidEvent("PUJA_ACEPTADA", 6001, 9001, 10L, new BigDecimal("25300"),
 				"ARS", 2L, 2L, 1, "Postor #1");
 		verify(messages).convertAndSend("/topic/subastas/6001/items/9001/pujas", publicEvent);
-		verify(messages).convertAndSendToUser("3001", "/queue/notificaciones",
+		verify(messages).convertAndSendToUser("3001", "/queue/pujas",
 				acceptedEvent);
 		verify(messages).convertAndSendToUser("3004", "/queue/pujas",
 				new BidEvent("PUJA_SUPERADA", 6001, 9001, 10L, new BigDecimal("25300"), "ARS", 2L, 2L, 1, "Postor #1"));
@@ -40,5 +41,15 @@ class BidRealtimePublisherTests {
 		assertEquals("Postor #1", publicEvent.postorAlias());
 		assertFalse(json.contains("email"));
 		assertFalse(json.contains("nombre"));
+	}
+
+	@Test void publicaPujaRechazadaEnColaPrivadaDePujas() {
+		SimpMessagingTemplate messages = mock(SimpMessagingTemplate.class);
+		BidRealtimePublisher publisher = new BidRealtimePublisher(messages);
+
+		publisher.publishRejected(3001L, 6001, 9001, "BID_OUTDATED_STATE", "Estado desactualizado");
+
+		verify(messages).convertAndSendToUser("3001", "/queue/pujas",
+				new RejectedBidEvent("PUJA_RECHAZADA", 6001, 9001, "BID_OUTDATED_STATE", "Estado desactualizado"));
 	}
 }

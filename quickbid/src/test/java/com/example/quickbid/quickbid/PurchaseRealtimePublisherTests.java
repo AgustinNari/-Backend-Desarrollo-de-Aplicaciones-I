@@ -21,6 +21,8 @@ class PurchaseRealtimePublisherTests {
 		publisher.publish(event, 3001L);
 
 		verify(messages).convertAndSend("/topic/subastas/6001/estado", event);
-		verify(messages).convertAndSendToUser("3001", "/queue/notificaciones", event);
+		verify(messages).convertAndSendToUser("3001", "/queue/notificaciones",
+				new LotClosedEvent("LOTE_GANADO", 6001, 9001, 13010L, 12501L,
+						new BigDecimal("25100"), "ARS", false, 2L));
 	}
 }

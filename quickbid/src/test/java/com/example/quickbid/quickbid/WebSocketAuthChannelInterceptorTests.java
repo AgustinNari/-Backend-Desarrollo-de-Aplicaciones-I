@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.messaging.Message;
@@ -66,10 +67,13 @@ class WebSocketAuthChannelInterceptorTests {
 		when(accounts.findById(3001L)).thenReturn(Optional.of(account));
 		when(account.getEstado()).thenReturn("activa");
 		Message<?> message = message(StompCommand.CONNECT, "Bearer jwt-demo", "session-1", null, null);
+		AtomicReference<java.security.Principal> propagated = new AtomicReference<>();
+		StompHeaderAccessor.getAccessor(message, StompHeaderAccessor.class).setUserChangeCallback(propagated::set);
 
 		Message<?> authenticated = interceptor.preSend(message, channel);
 
 		assertEquals("3001", StompHeaderAccessor.wrap(authenticated).getUser().getName());
+		assertEquals("3001", propagated.get().getName());
 		verify(connections).connected("session-1", 3001L);
 	}
 
@@ -125,6 +129,7 @@ class WebSocketAuthChannelInterceptorTests {
 		if (sessionId != null) accessor.setSessionId(sessionId);
 		if (destination != null) accessor.setDestination(destination);
 		if (accountId != null) accessor.setUser(new UsernamePasswordAuthenticationToken(accountId, null));
+		accessor.setLeaveMutable(true);
 		return MessageBuilder.createMessage(new byte[0], accessor.getMessageHeaders());
 	}
 }

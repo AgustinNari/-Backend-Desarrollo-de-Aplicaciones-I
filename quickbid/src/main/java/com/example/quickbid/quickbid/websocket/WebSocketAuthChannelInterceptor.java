@@ -9,7 +9,7 @@ import org.springframework.messaging.MessagingException;
 import org.springframework.messaging.simp.stomp.StompCommand;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.messaging.support.ChannelInterceptor;
-import org.springframework.messaging.support.MessageBuilder;
+import org.springframework.messaging.support.MessageHeaderAccessor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.stereotype.Component;
 
@@ -33,12 +33,13 @@ public class WebSocketAuthChannelInterceptor implements ChannelInterceptor {
 
 	@Override
 	public Message<?> preSend(Message<?> message, MessageChannel channel) {
-		StompHeaderAccessor accessor = StompHeaderAccessor.wrap(message);
+		StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
+		if (accessor == null) return message;
 		if (accessor.getCommand() == StompCommand.CONNECT) authenticate(accessor);
 		if (accessor.getCommand() == StompCommand.SUBSCRIBE) authorizeSubscription(accessor);
 		if (accessor.getCommand() == StompCommand.DISCONNECT) connections.disconnected(accessor.getSessionId());
 		connections.touch(accessor.getSessionId());
-		return MessageBuilder.createMessage(message.getPayload(), accessor.getMessageHeaders());
+		return message;
 	}
 
 	private void authenticate(StompHeaderAccessor accessor) {

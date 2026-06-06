@@ -37,7 +37,7 @@ public class BidRealtimePublisher {
 		messages.convertAndSend(itemTopic(accepted), event("MEJOR_OFERTA_ACTUALIZADA", accepted));
 		messages.convertAndSend(stateTopic(accepted), new AuctionStateEvent("ESTADO_ACTUALIZADO", accepted.subastaId(),
 				accepted.itemCatalogoId(), accepted.mejorOfertaActual(), accepted.moneda(), accepted.versionEstado()));
-		messages.convertAndSendToUser(acceptedAccountId.toString(), "/queue/notificaciones", acceptedEvent);
+		messages.convertAndSendToUser(acceptedAccountId.toString(), "/queue/pujas", acceptedEvent);
 		if (surpassedAccountId != null) {
 			messages.convertAndSendToUser(surpassedAccountId.toString(), "/queue/pujas",
 					event("PUJA_SUPERADA", accepted));
