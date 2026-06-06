@@ -14,11 +14,12 @@ Estados:
 | Ítem | Estado | Evidencia o nota |
 | --- | --- | --- |
 | Proyecto compila | completo | `.\mvnw.cmd clean test` |
-| Migraciones crean tablas legacy y nuevas | parcial | `V1` a `V8` ya validadas sobre PostgreSQL vacio; `V9`, `V10` y `V11` cubiertas por tests H2 y pendientes de validacion Flyway real sobre PostgreSQL vacio |
+| Migraciones crean tablas legacy y nuevas | parcial | `V1` a `V8` ya validadas sobre PostgreSQL vacio; `V9`, `V10`, `V11` y `V12` cubiertas por tests y pendientes de validacion Flyway real sobre PostgreSQL vacio |
 | No se modifican tablas legacy más allá de crearlas | completo | Extensiones posteriores usan tablas `app_*`; el seed inserta escenarios legacy válidos |
 | Seed base y demo disponibles | completo | `V3__seed_base.sql` y `V4__seed_demo_data.sql` |
 | Migracion V10 compras | completo | Agrega comisiones congeladas y snapshot de direccion sobre tablas `app_*`; cubierta por tests H2 del bloque |
 | Migracion V11 consignacion | completo | Agrega `segmento` separado de `categoriaSubasta` sobre `app_solicitudes_consignacion`; cubierta por `ConsignmentIntegrationTests` |
+| Migracion V12 backfill comision vendedor | completo | Corrige solo `app_compras.comision_vendedor` desde `app_solicitudes_consignacion.comision_vendedor_pct`, sin alterar comprador ni compras legacy; idempotencia cubierta por `PurchaseIntegrationTests` |
 | Estructura clara | completo | Controllers, services, repositories, entities, DTOs, security, websocket, audit y storage |
 | README con pasos para correr y probar | completo | `README.md` |
 

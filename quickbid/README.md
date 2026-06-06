@@ -692,6 +692,11 @@ Detener el backend antes de eliminar esa base temporal.
 - `V11__consignment_segment_and_review_flow.sql`: separa `segmento` de
   `categoriaSubasta` en consignaciones y migra datos existentes sin tocar
   tablas legacy.
+- `V12__fix_seller_commission_backfill.sql`: corrige únicamente el backfill de
+  `app_compras.comision_vendedor` para compras vinculadas a consignaciones,
+  usando `comision_vendedor_pct`; no altera comisión comprador ni compras
+  legacy sin consignación y evita escrituras innecesarias con
+  `IS DISTINCT FROM`.
 
 `V4` usa IDs explícitos en rangos demo y resincroniza las secuencias al final.
 Flyway ejecuta cada migración una sola vez por base. Para reiniciar todos los
@@ -960,9 +965,9 @@ no dependa de una instalación PostgreSQL local:
 La validación real de Flyway debe ejecutarse adicionalmente contra una base
 PostgreSQL vacía, porque H2 no reemplaza las pruebas del dialecto productivo.
 Se verifico previamente el arranque con perfil `dev` desde cero sobre
-PostgreSQL local para `V1` a `V8`. Tras agregar `V9`, `V10` y `V11`,
-corresponde validar de nuevo Flyway sobre una base PostgreSQL vacia antes de la
-entrega final.
+PostgreSQL local para `V1` a `V8`. `V9`, `V10`, `V11` y `V12` estan cubiertas
+por tests, pero siguen pendientes de validacion Flyway real sobre una base
+PostgreSQL vacia antes de la entrega final.
 
 ## Decisiones Y Limitaciones Conocidas
 
@@ -993,7 +998,7 @@ El estado punto por punto está documentado en
   `APP_JWT_SECRET` con un valor largo; no usar defaults compartidos.
 - Error de conexión PostgreSQL: verificar `DB_URL`, `DB_USERNAME`,
   `DB_PASSWORD`, servicio local y existencia de la base.
-- Error de Hibernate al iniciar: revisar que Flyway haya aplicado `V1` a `V11`
+- Error de Hibernate al iniciar: revisar que Flyway haya aplicado `V1` a `V12`
   y consultar `flyway_schema_history`.
 - `401 UNAUTHORIZED`: enviar `Authorization: Bearer <accessToken>` vigente.
 - `403 ACCOUNT_BLOCKED`: usar otra cuenta demo o regularizar el escenario de

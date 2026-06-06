@@ -120,6 +120,7 @@
 - [ ] Comisión comprador/vendedor sobre precio final.
 - [ ] Empresa compra al precio base sin comisión comprador.
 - [ ] Consignación mínimo 6 y máximo 15 fotos.
+- [x] V12 corrige el backfill historico de comision vendedor para consignaciones sin alterar comision comprador ni compras legacy; cubierta por tests y pendiente de validacion Flyway real sobre PostgreSQL vacio.
 - [ ] `segmento` separado de `categoriaSubasta`.
 - [ ] Direcciones de envío hasta 5 activas.
 - [x] Notificaciones leidas/no leidas con limpieza 30/90 dias o endpoint/job equivalente.
