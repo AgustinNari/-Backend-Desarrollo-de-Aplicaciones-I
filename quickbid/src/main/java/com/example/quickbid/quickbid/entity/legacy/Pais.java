@@ -15,6 +15,15 @@ public class Pais {
 	@Column(nullable = false)
 	private String nombre;
 
+	@Column(name = "\"nombreCorto\"")
+	private String nombreCorto;
+
+	@Column(nullable = false)
+	private String capital;
+
+	@Column(nullable = false)
+	private String nacionalidad;
+
 	protected Pais() {
 	}
 
@@ -24,5 +33,17 @@ public class Pais {
 
 	public String getNombre() {
 		return nombre;
+	}
+
+	public String getNombreCorto() {
+		return nombreCorto;
+	}
+
+	public String getCapital() {
+		return capital;
+	}
+
+	public String getNacionalidad() {
+		return nacionalidad;
 	}
 }

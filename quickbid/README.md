@@ -7,6 +7,20 @@ Se implementaron `POST /api/auth/registro/etapa1`, `etapa2`,
 `recuperar-clave`, `PUT /api/auth/cambiar-clave` y `GET /api/auth/sesion`.
 Los endpoints protegidos reciben `Authorization: Bearer <accessToken>`.
 
+El catalogo de paises es publico para que registro pueda mostrar un selector
+buscable sin hardcodear IDs legacy:
+
+```text
+GET /api/catalogos/paises?q=&buscar=&page=0&size=50
+GET /api/catalogos/paises/{id}
+```
+
+`q` y `buscar` son alias. La busqueda ignora mayusculas/minusculas y considera
+nombre, nombre corto, nacionalidad y capital. El listado se ordena por nombre;
+la respuesta usa `id` como alias de `paises.numero` y mantiene el envelope
+uniforme `ApiResponse`. Por ejemplo, buscar `arg` devuelve Argentina con
+`id=32`, valor que debe enviarse como `idPaisOrigen` en registro etapa 1.
+
 Login demo:
 
 ```powershell

@@ -24,6 +24,39 @@ Error:
 }
 ```
 
+## Catalogos publicos
+
+No requieren token porque se usan durante el registro.
+
+- `GET /api/catalogos/paises?q=&buscar=&page=0&size=50`
+- `GET /api/catalogos/paises/{id}`
+
+`q` y `buscar` son alias opcionales. La busqueda es case-insensitive sobre
+nombre, nombre corto, nacionalidad y capital. Sin busqueda, los paises se
+devuelven paginados y ordenados por nombre. `id` es el alias frontend-friendly
+de `paises.numero`.
+
+```json
+{
+  "data": {
+    "content": [
+      {
+        "id": 32,
+        "nombre": "Argentina",
+        "nombreCorto": "AR",
+        "nacionalidad": "argentina"
+      }
+    ],
+    "page": 0,
+    "size": 50,
+    "totalElements": 1,
+    "totalPages": 1
+  },
+  "message": "Paises",
+  "errors": []
+}
+```
+
 ## Auth y registro
 
 ### `POST /api/auth/registro/etapa1`

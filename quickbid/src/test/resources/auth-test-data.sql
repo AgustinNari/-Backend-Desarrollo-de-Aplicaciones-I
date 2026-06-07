@@ -2,7 +2,10 @@ DROP ALL OBJECTS;
 
 CREATE TABLE paises (
     numero integer PRIMARY KEY,
-    nombre varchar(250) NOT NULL
+    nombre varchar(250) NOT NULL,
+    "nombreCorto" varchar(250),
+    capital varchar(250),
+    nacionalidad varchar(250)
 );
 
 CREATE TABLE personas (
@@ -498,7 +501,12 @@ CREATE TABLE app_liquidaciones_consignacion (
     paid_at timestamp with time zone
 );
 
-INSERT INTO paises (numero, nombre) VALUES (32, 'Argentina');
+INSERT INTO paises (numero, nombre, "nombreCorto", capital, nacionalidad) VALUES
+    (32, 'Argentina', 'AR', 'Buenos Aires', 'argentina'),
+    (76, 'Brasil', 'BR', 'Brasilia', 'brasileña'),
+    (152, 'Chile', 'CL', 'Santiago', 'chilena'),
+    (858, 'Uruguay', 'UY', 'Montevideo', 'uruguaya'),
+    (840, 'Estados Unidos', 'US', 'Washington D.C.', 'estadounidense');
 
 INSERT INTO personas (identificador, documento, nombre, direccion, estado) VALUES
     (2001, 'DNI-DEMO-APROBADO', 'Ana Aprobada', 'Av. Demo 100', 'activo'),

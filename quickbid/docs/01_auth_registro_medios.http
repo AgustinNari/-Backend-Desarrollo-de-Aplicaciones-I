@@ -20,6 +20,16 @@
 ### 00 - Health
 GET {{baseUrl}}/actuator/health
 
+### 00.1 - Catalogo publico - listar paises
+GET {{baseUrl}}/api/catalogos/paises?page=0&size=50
+
+### 00.2 - Catalogo publico - buscar Argentina
+# El id retornado (32 en el seed) se envia como idPaisOrigen en registro etapa 1.
+GET {{baseUrl}}/api/catalogos/paises?q=arg
+
+### 00.3 - Catalogo publico - detalle de Argentina
+GET {{baseUrl}}/api/catalogos/paises/32
+
 ### 01 - Login aprobado
 # @name loginAprobado
 POST {{baseUrl}}/api/auth/login
@@ -200,6 +210,7 @@ POST {{baseUrl}}/api/admin/medios-pago/vencer-expirados
 X-QuickBid-Admin-Key: {{adminKey}}
 
 ### 18 - Registro etapa 1 con email unico
+# idPaisOrigen=32 fue seleccionado desde GET /api/catalogos/paises?q=arg.
 # @name registroEtapa1
 POST {{baseUrl}}/api/auth/registro/etapa1
 Content-Type: application/json

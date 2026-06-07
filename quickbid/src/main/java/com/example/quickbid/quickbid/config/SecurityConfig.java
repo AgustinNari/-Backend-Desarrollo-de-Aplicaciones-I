@@ -32,6 +32,7 @@ public class SecurityConfig {
 						.accessDeniedHandler(accessDeniedHandler))
 				.authorizeHttpRequests(auth -> auth
 						.requestMatchers("/api/auth/registro/**", "/api/auth/login", "/api/auth/refresh", "/api/auth/recuperar-clave", "/api/auth/cambiar-clave", "/api/auth/logout", "/actuator/health", "/ws", "/ws/**", "/ws-test.html", "/favicon.ico").permitAll()
+						.requestMatchers("/api/catalogos/**").permitAll()
 						.requestMatchers(HttpMethod.GET, "/api/subastas", "/api/subastas/*", "/api/subastas/*/catalogo", "/api/items/*").permitAll()
 						.requestMatchers("/api/admin/**").hasRole("ADMIN")
 						.anyRequest().authenticated())
