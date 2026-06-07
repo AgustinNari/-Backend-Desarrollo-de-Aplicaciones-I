@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -357,12 +358,34 @@ class UsuarioIntegrationTests {
 		request(patch("/api/usuario/direcciones-envio/" + id.longValue() + "/principal"), "aprobado@quickbid.demo")
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.data.principal").value(true));
+		request(patch("/api/usuario/direcciones-envio/" + id.longValue() + "/principal"), "aprobado@quickbid.demo")
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.principal").value(true));
 		request(get("/api/usuario/direcciones-envio"), "aprobado@quickbid.demo")
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.data", hasSize(2)))
 				.andExpect(jsonPath("$.data[0].id").value(id.intValue()))
 				.andExpect(jsonPath("$.data[0].principal").value(true))
 				.andExpect(jsonPath("$.data[1].principal").value(false));
+		assertEquals(1, jdbc.queryForObject("""
+				SELECT COUNT(*) FROM app_direcciones_envio
+				WHERE cuenta_id=3001 AND principal=true AND deleted_at IS NULL
+				""", Integer.class));
+	}
+
+	@Test
+	void principalDireccionInexistenteOAjenaNoDevuelve500() throws Exception {
+		jdbc.update("""
+				INSERT INTO app_direcciones_envio
+					(id,cuenta_id,alias,destinatario,calle,numero,codigo_postal,localidad,provincia,pais,principal)
+				VALUES (5199,3002,'Ajena','Bruno Restringido','Calle Ajena','42','C1001',
+					'Buenos Aires','Buenos Aires','Argentina',false)
+				""");
+
+		request(patch("/api/usuario/direcciones-envio/5199/principal"), "aprobado@quickbid.demo")
+				.andExpect(status().isForbidden());
+		request(patch("/api/usuario/direcciones-envio/999999/principal"), "aprobado@quickbid.demo")
+				.andExpect(status().isNotFound());
 	}
 
 	private String addressBody(String alias, String street) {

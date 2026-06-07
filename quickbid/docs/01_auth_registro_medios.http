@@ -209,7 +209,7 @@ Content-Type: application/json
   "nombre": "Nuevo",
   "apellido": "Demo",
   "domicilioLegal": "Calle Demo 123",
-  "idPaisOrigen": 1
+  "idPaisOrigen": 32
 }
 
 ### 19 - Registro etapa 2 con campos finales fotoFrenteDni/fotoDorsoDni

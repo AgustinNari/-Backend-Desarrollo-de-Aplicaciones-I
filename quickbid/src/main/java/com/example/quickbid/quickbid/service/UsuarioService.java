@@ -183,9 +183,9 @@ public class UsuarioService {
 	public Address setPrincipalAddress(Long accountId, Long addressId) {
 		account(accountId);
 		DireccionEnvio selected = ownedAddress(accountId, addressId);
-		direcciones.findAllByCuentaIdAndDeletedAtIsNullOrderByPrincipalDescCreatedAtDesc(accountId)
-				.forEach(DireccionEnvio::clearPrincipal);
+		direcciones.clearOtherActivePrincipals(accountId, addressId);
 		selected.makePrincipal();
+		direcciones.saveAndFlush(selected);
 		audit.record(new AuditEvent("usuario", accountId, "usuario.direccion_envio_principal", "direccion_envio",
 				addressId, "{}"));
 		return address(selected);
