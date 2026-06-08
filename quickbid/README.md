@@ -113,6 +113,15 @@ Los links de setup y recuperacion se arman con `APP_FRONTEND_BASE_URL`. El token
 plano vive solo durante el armado del email: DB y auditoria conservan hashes y
 los logs no imprimen tokens.
 
+Para prueba local con Mailpit y deep links Android, ver
+[`docs/MAILPIT.md`](docs/MAILPIT.md). Con
+`APP_FRONTEND_BASE_URL=quickbid://auth`, los links de auth quedan:
+
+```text
+quickbid://auth/completar-registro?token=...
+quickbid://auth/recuperar-clave?token=...
+```
+
 Emails obligatorios: aprobacion de registro, reenvio de setup y recuperacion de
 clave. Si SMTP falla, la operacion no deja un token nuevo persistido; aprobacion
 admin responde error controlado y recuperacion/reenvio mantienen su respuesta

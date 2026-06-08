@@ -76,6 +76,29 @@ class MailServiceTests {
         assertTrue(sender.lastMessage.getText().contains(
                 "https://frontend.quickbid.demo/recuperar-clave?token=token+con+%2F%2B"
         ));
+        assertTrue(sender.lastMessage.getText().contains("Si no solicitaste esto, podes ignorar este mensaje."));
+    }
+
+    @Test
+    void tokenTemplatesBuildAndroidDeepLinksWithoutDuplicatedSlashes() {
+        MailTemplates templates = new MailTemplates("quickbid://auth/");
+
+        MailTemplates.Message setup = templates.token("registro", "token con /+");
+        MailTemplates.Message reset = templates.token("recuperacion", "token con /+");
+
+        assertTrue(setup.body().contains("quickbid://auth/completar-registro?token=token+con+%2F%2B"));
+        assertTrue(reset.body().contains("quickbid://auth/recuperar-clave?token=token+con+%2F%2B"));
+    }
+
+    @Test
+    void tokenTemplatesBuildAndroidDeepLinksWhenBaseUrlHasNoTrailingSlash() {
+        MailTemplates templates = new MailTemplates("quickbid://auth");
+
+        MailTemplates.Message setup = templates.token("registro", "abc");
+        MailTemplates.Message reset = templates.token("recuperacion", "abc");
+
+        assertTrue(setup.body().contains("quickbid://auth/completar-registro?token=abc"));
+        assertTrue(reset.body().contains("quickbid://auth/recuperar-clave?token=abc"));
     }
 
     @Test

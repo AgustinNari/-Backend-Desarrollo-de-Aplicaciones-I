@@ -1,6 +1,8 @@
 package com.example.quickbid.quickbid;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
@@ -248,6 +250,24 @@ class AuthIntegrationTests {
 	}
 
 	@Test
+	void recuperacionGeneraTokenHasheadoSinExponerTokenCrudo() throws Exception {
+		String json = mvc.perform(post("/api/auth/recuperar-clave").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"email\":\"aprobado@quickbid.demo\"}"))
+				.andExpect(status().isOk())
+				.andReturn().getResponse().getContentAsString();
+
+		assertTrue(!json.contains("token_hash"));
+		assertTrue(!json.contains("token-redactado"));
+		String hash = jdbc.queryForObject("""
+				SELECT token_hash FROM app_password_reset_tokens
+				WHERE cuenta_id=3001
+				ORDER BY id DESC LIMIT 1
+				""", String.class);
+		assertNotNull(hash);
+		assertEquals(64, hash.length());
+	}
+
+	@Test
 	void reenvioLinkNoExponeUsuarioInexistenteNiEnviaMail() throws Exception {
 		mvc.perform(post("/api/auth/registro/reenviar-link").contentType(MediaType.APPLICATION_JSON)
 				.content("{\"email\":\"ausente@quickbid.demo\"}"))
@@ -256,6 +276,29 @@ class AuthIntegrationTests {
 				.andExpect(jsonPath("$.errors").isArray());
 
 		assertEquals(0, mail.deliveries().size());
+	}
+
+	@Test
+	void reenvioLinkGeneraTokenNuevoHasheadoYRespuestaGenerica() throws Exception {
+		String raw = "setup-token-reenvio";
+		registrationReadyForSetup(9105, "setup-reenvio@quickbid.demo", raw,
+				"DATEADD('HOUR',48,CURRENT_TIMESTAMP)", "NULL", 2105);
+		String oldHash = jdbc.queryForObject("SELECT setup_token_hash FROM app_solicitudes_registro WHERE id=9105",
+				String.class);
+
+		String json = mvc.perform(post("/api/auth/registro/reenviar-link").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"email\":\"setup-reenvio@quickbid.demo\"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.message").value("Si corresponde, se envio un nuevo enlace"))
+				.andReturn().getResponse().getContentAsString();
+
+		String newHash = jdbc.queryForObject("SELECT setup_token_hash FROM app_solicitudes_registro WHERE id=9105",
+				String.class);
+		assertNotEquals(oldHash, newHash);
+		assertEquals(64, newHash.length());
+		assertTrue(!json.contains("setup_token"));
+		assertTrue(!json.contains("hash"));
+		assertTrue(delivered("token", "registro"));
 	}
 
 	@Test

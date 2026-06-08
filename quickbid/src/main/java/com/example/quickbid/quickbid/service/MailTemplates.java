@@ -50,10 +50,12 @@ public class MailTemplates {
 		return switch (purpose) {
 			case "registro" -> new Message("Completa tu registro en QuickBid",
 					"Completa tu registro y configura tu clave desde este enlace:\n"
-							+ frontendBaseUrl + "/completar-registro?token=" + encoded);
+							+ frontendBaseUrl + "/completar-registro?token=" + encoded
+							+ "\n\nSi no solicitaste esto, podes ignorar este mensaje.");
 			case "recuperacion" -> new Message("Recupera tu clave de QuickBid",
 					"Configura una nueva clave desde este enlace:\n"
-							+ frontendBaseUrl + "/recuperar-clave?token=" + encoded);
+							+ frontendBaseUrl + "/recuperar-clave?token=" + encoded
+							+ "\n\nSi no solicitaste esto, podes ignorar este mensaje.");
 			default -> throw new IllegalArgumentException("Tipo de token de mail desconocido");
 		};
 	}
