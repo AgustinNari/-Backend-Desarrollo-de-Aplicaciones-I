@@ -116,3 +116,15 @@ Eventos/timers recomendados:
 - `RESERVA_MEDIO_CONSUMIDA`
 
 Reglas finales: cierre automático de lote a 60 s sin superación, delay de 60 s antes del siguiente lote y delay de 120 s antes de finalizar subasta completa. Eventos frecuentes como puja superada deben priorizar WebSocket antes que notificación persistente.
+### Timers y ciclo de lotes
+
+- `PUJA_ACEPTADA`, `PUJA_SUPERADA`, `MEJOR_OFERTA_ACTUALIZADA` y
+  `ESTADO_ACTUALIZADO` incluyen `retencionHasta`.
+- `LOTE_ACTIVADO` se publica en `/topic/subastas/{subastaId}/estado` cuando el
+  scheduler avanza al siguiente artículo.
+- `SUBASTA_FINALIZADA` se publica en el mismo topic al cerrar el último lote.
+- La adjudicación ocurre exclusivamente en backend. El frontend sólo muestra el
+  countdown y refresca snapshot al llegar a cero.
+
+El scheduler corre cada `${app.auctions.scheduler-delay-ms:2000}` milisegundos
+y puede deshabilitarse con `app.auctions.scheduler-enabled=false`.

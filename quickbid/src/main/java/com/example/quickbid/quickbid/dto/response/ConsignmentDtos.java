@@ -30,7 +30,8 @@ public final class ConsignmentDtos {
 	public record File(Long archivoId, String filename, String contentType, Long sizeBytes, String estado) {
 	}
 
-	public record Return(Long id, String modalidad, BigDecimal costo, String moneda, String estado, Long pagoId) {
+	public record Return(Long id, String modalidad, BigDecimal costo, String moneda, String estado, Long pagoId,
+			Long direccionEnvioId, String direccionResumen) {
 	}
 
 	public record ReturnPayment(Long id, Long devolucionId, Long medioPagoId, BigDecimal monto, String moneda,

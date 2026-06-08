@@ -77,6 +77,7 @@ public class BidTransactionService {
 		int legacyBidId = insertLegacyBid(assistantId, request.itemCatalogoId(), request.monto());
 		long sequence = nextSequence(auctionId, request.itemCatalogoId());
 		long nextVersion = live.version() + 1;
+		OffsetDateTime retentionUntil = OffsetDateTime.now().plusSeconds(LOT_IDLE_SECONDS);
 		if (prior != null) {
 			jdbc.update("UPDATE app_pujas_live SET estado='superada' WHERE id=? AND estado='aceptada'", prior.id());
 			releaseReservation(prior.id());
@@ -85,9 +86,10 @@ public class BidTransactionService {
 				idempotencyKey);
 		reservePayment(request.medioPagoId(), id, request.monto());
 		jdbc.update("""
-				UPDATE app_subasta_estado_vivo SET version=?,lote_finaliza_estimado_at=?,updated_at=CURRENT_TIMESTAMP
+				UPDATE app_subasta_estado_vivo SET version=?,retencion_hasta=?,lote_finaliza_estimado_at=?,
+					updated_at=CURRENT_TIMESTAMP
 				WHERE subasta_id=?
-				""", nextVersion, OffsetDateTime.now().plusSeconds(LOT_IDLE_SECONDS), auctionId);
+				""", nextVersion, retentionUntil, retentionUntil, auctionId);
 		categories.addPoints(accountEntity(accountId), 1, "puja_aceptada", "puja", id);
 		insertNotification(accountId, "puja_aceptada", "Puja aceptada", "Tu puja es la mejor oferta.", id);
 		if (prior != null && !prior.accountId().equals(accountId)) {
@@ -99,7 +101,7 @@ public class BidTransactionService {
 				VALUES ('usuario',?,'subasta.puja_aceptada','puja',?,?)
 				""", accountId, id, "{\"subastaId\":" + auctionId + ",\"version\":" + nextVersion + "}");
 		Bid accepted = new Bid(id, auctionId, request.itemCatalogoId(), "aceptada", request.monto(), auction.currency(),
-				sequence, nextVersion, request.monto(), bidderNumber, false);
+				sequence, nextVersion, request.monto(), bidderNumber, false, retentionUntil);
 		return new AcceptedBid(accepted, prior == null || prior.accountId().equals(accountId) ? null : prior.accountId(),
 				false);
 	}
@@ -124,8 +126,11 @@ public class BidTransactionService {
 				|| value.amount().compareTo(request.monto()) != 0) {
 			throw conflict("La clave de idempotencia ya fue utilizada", "IDEMPOTENCY_CONFLICT");
 		}
+		OffsetDateTime retentionUntil = jdbc.queryForObject(
+				"SELECT retencion_hasta FROM app_subasta_estado_vivo WHERE subasta_id=?",
+				OffsetDateTime.class, auctionId);
 		return new Bid(value.id(), value.auctionId(), value.itemId(), value.state(), value.amount(), value.currency(),
-				value.sequence(), value.version(), value.amount(), value.bidderNumber(), true);
+				value.sequence(), value.version(), value.amount(), value.bidderNumber(), true, retentionUntil);
 	}
 
 	private LiveState lockLiveState(Integer auctionId) {

@@ -36,7 +36,8 @@ public class BidRealtimePublisher {
 		BidEvent acceptedEvent = event("PUJA_ACEPTADA", accepted);
 		messages.convertAndSend(itemTopic(accepted), event("MEJOR_OFERTA_ACTUALIZADA", accepted));
 		messages.convertAndSend(stateTopic(accepted), new AuctionStateEvent("ESTADO_ACTUALIZADO", accepted.subastaId(),
-				accepted.itemCatalogoId(), accepted.mejorOfertaActual(), accepted.moneda(), accepted.versionEstado()));
+				accepted.itemCatalogoId(), accepted.mejorOfertaActual(), accepted.moneda(), accepted.versionEstado(),
+				accepted.retencionHasta()));
 		messages.convertAndSendToUser(acceptedAccountId.toString(), "/queue/pujas", acceptedEvent);
 		if (surpassedAccountId != null) {
 			messages.convertAndSendToUser(surpassedAccountId.toString(), "/queue/pujas",
@@ -51,7 +52,8 @@ public class BidRealtimePublisher {
 
 	private BidEvent event(String type, Bid bid) {
 		return new BidEvent(type, bid.subastaId(), bid.itemCatalogoId(), bid.id(), bid.monto(), bid.moneda(),
-				bid.secuencia(), bid.versionEstado(), bid.numeroPostor(), "Postor #" + bid.numeroPostor());
+				bid.secuencia(), bid.versionEstado(), bid.numeroPostor(), "Postor #" + bid.numeroPostor(),
+				bid.retencionHasta());
 	}
 
 	private String itemTopic(Bid bid) {

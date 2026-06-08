@@ -201,6 +201,14 @@ Invitado no ve precio base, mejor oferta, cantidad/historial de pujas, item vivo
 - `GET /api/subastas/{id}/puja-actual`
 - `POST /api/subastas/{id}/pujar`
 
+`GET /api/subastas/{id}/puja-actual` incluye `serverNow`, `retencionHasta`,
+`segundosRestantes`, `miPujaGanadora`, `estadoLote`, `adjudicado`,
+`precioBase`, `incrementoMinimo` y `siguienteAccion`. `miPujaGanadora` se
+calcula para la cuenta autenticada; no se expone la identidad del mejor postor.
+
+Cada puja aceptada reinicia una retencion persistente de 60 segundos. Al vencer,
+el scheduler interno cierra el lote mediante el flujo idempotente de compras.
+
 Inscripción:
 
 ```json
@@ -269,3 +277,7 @@ Medio: `pendiente_verificacion`, `verificado`, `rechazado`, `vencido`, `eliminad
 Compra sugeridos: `adjudicacion_pendiente`, `multa_activa`, `pagos_extra_pendientes`, `pagada`, `entrega_pendiente`, `retiro_pendiente`, `abandonada_por_incumplimiento_pago`, `abandonada_por_incumplimiento_retiro`, `completada`.
 
 Consignación sugeridos: `pendiente_revision`, `rechazo_inicial`, `documentacion_adicional`, `recepcion_pendiente`, `revision_fisica`, `rechazo_revision_fisica`, `acuerdo_pendiente`, `acuerdo_aceptado`, `acuerdo_rechazado`, `devolucion_pendiente`, `publicada`, `en_subasta`, `vendida`, `comprada_por_empresa`, `liquidada`, `devolucion_incompleta`.
+Para modalidad `envio`, devolución acepta `direccionEnvioId` opcional. Si se
+envía, debe ser una dirección activa de la cuenta autenticada y el backend
+guarda además un snapshot textual. El request textual anterior continúa
+disponible como fallback compatible.

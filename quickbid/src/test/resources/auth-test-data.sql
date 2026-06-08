@@ -293,6 +293,7 @@ CREATE TABLE app_subasta_estado_vivo (
     usuarios_conectados integer NOT NULL DEFAULT 0,
     lote_iniciado_at timestamp with time zone,
     lote_finaliza_estimado_at timestamp with time zone,
+    retencion_hasta timestamp with time zone,
     proximo_lote_programado_at timestamp with time zone,
     subasta_finaliza_programado_at timestamp with time zone,
     updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -485,6 +486,7 @@ CREATE TABLE app_consignacion_devoluciones (
     localidad varchar(120),
     provincia varchar(120),
     telefono_contacto varchar(50),
+    direccion_envio_id bigint,
     created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

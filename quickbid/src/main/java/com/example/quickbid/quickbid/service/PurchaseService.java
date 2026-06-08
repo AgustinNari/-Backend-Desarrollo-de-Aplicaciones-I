@@ -27,6 +27,7 @@ import com.example.quickbid.quickbid.dto.response.PurchaseDtos.LotClosedEvent;
 import com.example.quickbid.quickbid.dto.response.PurchaseDtos.Page;
 import com.example.quickbid.quickbid.dto.response.PurchaseDtos.Payment;
 import com.example.quickbid.quickbid.dto.response.PurchaseDtos.Summary;
+import com.example.quickbid.quickbid.dto.response.SubastaDtos.AuctionLifecycleEvent;
 import com.example.quickbid.quickbid.entity.app.CuentaApp;
 import com.example.quickbid.quickbid.exception.BusinessException;
 import com.example.quickbid.quickbid.repository.app.CuentaAppRepository;
@@ -202,6 +203,7 @@ public class PurchaseService {
 				auctionId);
 		jdbc.update("UPDATE subastas SET estado='cerrada' WHERE identificador=?", auctionId);
 		audit.record(new AuditEvent("sistema", null, "subasta.cerrada", "subasta", auctionId.longValue(), "{}"));
+		realtime.afterCommit(new AuctionLifecycleEvent("SUBASTA_FINALIZADA", auctionId, null, live.version()));
 	}
 
 	@Transactional
@@ -575,7 +577,7 @@ public class PurchaseService {
 		OffsetDateTime closeAuctionAt = remaining == null || remaining == 0 ? now.plusSeconds(AUCTION_CLOSE_DELAY_SECONDS) : null;
 		jdbc.update("""
 				UPDATE app_subasta_estado_vivo
-				SET item_catalogo_activo_id=NULL,version=?,lote_finaliza_estimado_at=NULL,
+				SET item_catalogo_activo_id=NULL,version=?,retencion_hasta=NULL,lote_finaliza_estimado_at=NULL,
 					proximo_lote_programado_at=?,subasta_finaliza_programado_at=?,updated_at=CURRENT_TIMESTAMP
 				WHERE subasta_id=?
 				""", nextVersion, nextLotAt, closeAuctionAt, auctionId);

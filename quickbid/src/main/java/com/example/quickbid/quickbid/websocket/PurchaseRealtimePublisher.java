@@ -6,6 +6,7 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.example.quickbid.quickbid.dto.response.PurchaseDtos.LotClosedEvent;
+import com.example.quickbid.quickbid.dto.response.SubastaDtos.AuctionLifecycleEvent;
 
 @Service
 public class PurchaseRealtimePublisher {
@@ -36,6 +37,20 @@ public class PurchaseRealtimePublisher {
 					new LotClosedEvent("LOTE_GANADO", event.subastaId(), event.itemCatalogoId(), event.compraId(),
 							event.pujaGanadoraId(), event.montoAdjudicacion(), event.moneda(), event.compradorEmpresa(),
 							event.versionEstado()));
+		}
+	}
+
+	public void afterCommit(AuctionLifecycleEvent event) {
+		Runnable publish = () -> messages.convertAndSend("/topic/subastas/" + event.subastaId() + "/estado", event);
+		if (TransactionSynchronizationManager.isSynchronizationActive()) {
+			TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+				@Override
+				public void afterCommit() {
+					publish.run();
+				}
+			});
+		} else {
+			publish.run();
 		}
 	}
 }

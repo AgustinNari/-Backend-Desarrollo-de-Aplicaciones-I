@@ -212,6 +212,11 @@ Documentos principales: factura/comprobante de compra, recibo de multa, acuerdo 
 
 Preferir jobs automáticos para vencer medios verificados, bloquear cuentas con multas vencidas, marcar compras abandonadas, marcar devoluciones vencidas y limpiar notificaciones. Si no hay job, endpoint admin auxiliar para procesar/simular.
 
+El ciclo live de subastas usa un scheduler interno configurable mediante
+`app.auctions.scheduler-enabled` y `app.auctions.scheduler-delay-ms`. La
+retención ganadora se persiste en `app_subasta_estado_vivo.retencion_hasta`; el
+cierre reutiliza el flujo transaccional e idempotente de adjudicación existente.
+
 ## Estados finales mínimos
 
 - Medio pendiente: `pendiente_verificacion`

@@ -78,20 +78,42 @@ public final class SubastaDtos {
 	}
 
 	public record CurrentBid(Integer subastaId, Integer itemActivoId, BigDecimal mejorOfertaActual,
-			String moneda, Long versionEstado, Boolean puedePujar, String motivo) {
+			String moneda, Long versionEstado, Boolean puedePujar, String motivo, BigDecimal precioBase,
+			BigDecimal incrementoMinimo, OffsetDateTime serverNow, OffsetDateTime retencionHasta,
+			Long segundosRestantes, Boolean miPujaGanadora, String estadoLote, Boolean adjudicado,
+			String siguienteAccion) {
 	}
 
 	public record Bid(Long id, Integer subastaId, Integer itemCatalogoId, String estado, BigDecimal monto,
 			String moneda, Long secuencia, Long versionEstado, BigDecimal mejorOfertaActual, Integer numeroPostor,
-			Boolean idempotentReplay) {
+			Boolean idempotentReplay, OffsetDateTime retencionHasta) {
+		public Bid(Long id, Integer subastaId, Integer itemCatalogoId, String estado, BigDecimal monto,
+				String moneda, Long secuencia, Long versionEstado, BigDecimal mejorOfertaActual, Integer numeroPostor,
+				Boolean idempotentReplay) {
+			this(id, subastaId, itemCatalogoId, estado, monto, moneda, secuencia, versionEstado, mejorOfertaActual,
+					numeroPostor, idempotentReplay, null);
+		}
 	}
 
 	public record BidEvent(String tipo, Integer subastaId, Integer itemCatalogoId, Long pujaId, BigDecimal monto,
-			String moneda, Long secuencia, Long versionEstado, Integer numeroPostor, String postorAlias) {
+			String moneda, Long secuencia, Long versionEstado, Integer numeroPostor, String postorAlias,
+			OffsetDateTime retencionHasta) {
+		public BidEvent(String tipo, Integer subastaId, Integer itemCatalogoId, Long pujaId, BigDecimal monto,
+				String moneda, Long secuencia, Long versionEstado, Integer numeroPostor, String postorAlias) {
+			this(tipo, subastaId, itemCatalogoId, pujaId, monto, moneda, secuencia, versionEstado, numeroPostor,
+					postorAlias, null);
+		}
 	}
 
 	public record AuctionStateEvent(String tipo, Integer subastaId, Integer itemCatalogoActivoId,
-			BigDecimal mejorOfertaActual, String moneda, Long versionEstado) {
+			BigDecimal mejorOfertaActual, String moneda, Long versionEstado, OffsetDateTime retencionHasta) {
+		public AuctionStateEvent(String tipo, Integer subastaId, Integer itemCatalogoActivoId,
+				BigDecimal mejorOfertaActual, String moneda, Long versionEstado) {
+			this(tipo, subastaId, itemCatalogoActivoId, mejorOfertaActual, moneda, versionEstado, null);
+		}
+	}
+
+	public record AuctionLifecycleEvent(String tipo, Integer subastaId, Integer itemCatalogoId, Long versionEstado) {
 	}
 
 	public record RejectedBidEvent(String tipo, Integer subastaId, Integer itemCatalogoId, String code,

@@ -49,6 +49,7 @@ public class SubastaService {
 	private static final Set<String> ACTIVE_ENROLLMENT_STATES = Set.of("pendiente_validacion", "aprobada");
 	private static final Set<String> AUCTION_STATES = Set.of("programada", "abierta", "en_vivo", "cerrada", "finalizada");
 	private static final Set<String> AUCTION_CATEGORIES = Set.of("comun", "especial", "plata", "oro", "platino");
+	private static final Set<String> ONE_UNIT_INCREMENT_CATEGORIES = Set.of("oro", "platino");
 	private static final Set<String> CURRENCIES = Set.of("ARS", "USD");
 	private static final String AUCTION_SELECT = """
 			SELECT s.identificador, e.titulo, e.descripcion, s.fecha, s.hora, s.ubicacion,
@@ -193,17 +194,41 @@ public class SubastaService {
 		if (verification.cuentaBloqueada()) throw forbidden("La cuenta no puede ver informacion live", "ACCOUNT_BLOCKED");
 		Auction auction = auction(subastaId);
 		return jdbc.query("""
-				SELECT v.item_catalogo_activo_id,v.version,
+				SELECT v.item_catalogo_activo_id,v.version,v.retencion_hasta,i."precioBase",
 				       (SELECT MAX(p.monto) FROM app_pujas_live p
 				        WHERE p.subasta_id=v.subasta_id AND p.item_catalogo_id=v.item_catalogo_activo_id
-				          AND p.estado IN ('aceptada','ganadora')) mejor_oferta
-				FROM app_subasta_estado_vivo v WHERE v.subasta_id=?
+				          AND p.estado IN ('aceptada','ganadora')) mejor_oferta,
+				       (SELECT p.cuenta_id FROM app_pujas_live p
+				        WHERE p.subasta_id=v.subasta_id AND p.item_catalogo_id=v.item_catalogo_activo_id
+				          AND p.estado IN ('aceptada','ganadora')
+				        ORDER BY p.monto DESC,p.secuencia DESC LIMIT 1) mejor_postor_id
+				FROM app_subasta_estado_vivo v
+				LEFT JOIN "itemsCatalogo" i ON i.identificador=v.item_catalogo_activo_id
+				WHERE v.subasta_id=?
 				""", rs -> {
 			if (!rs.next()) throw notFound("Estado vivo inexistente");
+			OffsetDateTime now = OffsetDateTime.now();
+			OffsetDateTime retentionUntil = rs.getObject("retencion_hasta", OffsetDateTime.class);
+			Long remaining = retentionUntil == null ? null
+					: Math.max(0, java.time.Duration.between(now, retentionUntil).toSeconds());
+			Long bestAccountId = (Long) rs.getObject("mejor_postor_id");
+			Integer activeItem = (Integer) rs.getObject("item_catalogo_activo_id");
+			BigDecimal basePrice = rs.getBigDecimal("precioBase");
 			return new CurrentBid(subastaId, (Integer) rs.getObject("item_catalogo_activo_id"),
 					rs.getBigDecimal("mejor_oferta"), auction.moneda(), rs.getLong("version"), verification.puedePujar(),
-					verification.puedePujar() ? null : "El usuario puede ver live pero no cumple las condiciones para pujar");
+					verification.puedePujar() ? null : "El usuario puede ver live pero no cumple las condiciones para pujar",
+					basePrice, minimumIncrement(auction.categoria(), basePrice), now,
+					retentionUntil, remaining, bestAccountId != null && bestAccountId.equals(cuentaId),
+					activeItem == null ? "cerrado" : "activo", activeItem == null,
+					activeItem == null ? "esperar_siguiente_lote" : "pujar");
 		}, subastaId);
+	}
+
+	private BigDecimal minimumIncrement(String category, BigDecimal basePrice) {
+		if (basePrice == null) return null;
+		return ONE_UNIT_INCREMENT_CATEGORIES.contains(category)
+				? BigDecimal.ONE
+				: basePrice.multiply(new BigDecimal("0.01"));
 	}
 
 	private List<?> items(Integer catalogId, boolean authenticated) {

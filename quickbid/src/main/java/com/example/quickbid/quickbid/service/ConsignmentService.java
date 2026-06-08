@@ -36,9 +36,11 @@ import com.example.quickbid.quickbid.dto.response.ConsignmentDtos.ReturnPayment;
 import com.example.quickbid.quickbid.dto.response.ConsignmentDtos.Summary;
 import com.example.quickbid.quickbid.entity.app.ArchivoApp;
 import com.example.quickbid.quickbid.entity.app.CuentaApp;
+import com.example.quickbid.quickbid.entity.app.DireccionEnvio;
 import com.example.quickbid.quickbid.exception.BusinessException;
 import com.example.quickbid.quickbid.repository.app.ArchivoAppRepository;
 import com.example.quickbid.quickbid.repository.app.CuentaAppRepository;
+import com.example.quickbid.quickbid.repository.app.DireccionEnvioRepository;
 import com.example.quickbid.quickbid.repository.app.PaymentMethodQueryRepository;
 import com.example.quickbid.quickbid.storage.StorageService;
 
@@ -56,13 +58,14 @@ public class ConsignmentService {
 	private final AuditService audit;
 	private final MailNotificationService mail;
 	private final PaymentMethodQueryRepository paymentMethodQueries;
+	private final DireccionEnvioRepository addresses;
 	private final BigDecimal returnShippingCost;
 	private final int publishedPoints;
 
 	public ConsignmentService(JdbcTemplate jdbc, CuentaAppRepository accounts, ArchivoAppRepository files,
 			StorageService storage, ImageValidationService images, DocumentValidationService documents,
 			CategoriaService categories, AuditService audit, MailNotificationService mail,
-			PaymentMethodQueryRepository paymentMethodQueries,
+			PaymentMethodQueryRepository paymentMethodQueries, DireccionEnvioRepository addresses,
 			@Value("${app.consignment.return-shipping-flat-cost:12000}") BigDecimal returnShippingCost,
 			@Value("${app.consignment.published-points:70}") int publishedPoints) {
 		this.jdbc = jdbc;
@@ -75,6 +78,7 @@ public class ConsignmentService {
 		this.audit = audit;
 		this.mail = mail;
 		this.paymentMethodQueries = paymentMethodQueries;
+		this.addresses = addresses;
 		this.returnShippingCost = returnShippingCost;
 		this.publishedPoints = publishedPoints;
 	}
@@ -245,20 +249,41 @@ public class ConsignmentService {
 		}
 		String modality = request.modalidad().trim().toLowerCase();
 		if (!Set.of("envio", "retiro").contains(modality)) throw bad("Modalidad invalida", "INVALID_RETURN_METHOD");
+		Long addressId = null;
+		String address = blankToNull(request.direccion());
+		String floor = blankToNull(request.piso());
+		String postalCode = blankToNull(request.codigoPostal());
+		String locality = blankToNull(request.localidad());
+		String province = blankToNull(request.provincia());
+		String phone = blankToNull(request.telefonoContacto());
 		if (modality.equals("envio")) {
-			required(request.direccion(), "direccion");
-			required(request.codigoPostal(), "codigoPostal");
-			required(request.localidad(), "localidad");
-			required(request.provincia(), "provincia");
+			if (request.direccionEnvioId() != null) {
+				DireccionEnvio selected = addresses.findById(request.direccionEnvioId())
+						.orElseThrow(() -> notFound("Direccion de envio inexistente"));
+				if (!selected.getCuentaId().equals(accountId) || selected.getDeletedAt() != null) {
+					throw forbidden("La direccion no pertenece al usuario", "RESOURCE_NOT_OWNED");
+				}
+				addressId = selected.getId();
+				address = selected.getCalle() + " " + selected.getNumero();
+				floor = selected.getPiso();
+				postalCode = selected.getCodigoPostal();
+				locality = selected.getLocalidad();
+				province = selected.getProvincia();
+				phone = selected.getTelefono();
+			} else {
+				required(address, "direccion");
+				required(postalCode, "codigoPostal");
+				required(locality, "localidad");
+				required(province, "provincia");
+			}
 		}
 		BigDecimal cost = modality.equals("envio") ? returnShippingCost : BigDecimal.ZERO;
 		String state = modality.equals("envio") ? "pendiente_pago" : "pendiente_retiro";
 		jdbc.update("""
-				UPDATE app_consignacion_devoluciones SET modalidad=?,direccion=?,piso=?,codigo_postal=?,localidad=?,
-					provincia=?,telefono_contacto=?,costo=?,estado=? WHERE id=?
-				""", modality, blankToNull(request.direccion()), blankToNull(request.piso()),
-				blankToNull(request.codigoPostal()), blankToNull(request.localidad()), blankToNull(request.provincia()),
-				blankToNull(request.telefonoContacto()), cost, state, returnValue.id());
+				UPDATE app_consignacion_devoluciones SET modalidad=?,direccion_envio_id=?,direccion=?,piso=?,
+					codigo_postal=?,localidad=?,provincia=?,telefono_contacto=?,costo=?,estado=? WHERE id=?
+				""", modality, addressId, address, floor, postalCode, locality, province, phone, cost, state,
+				returnValue.id());
 		audit(accountId, "consignacion.devolucion_seleccionada", id);
 		return returnDto(returnRow(id, false));
 	}
@@ -662,16 +687,25 @@ public class ConsignmentService {
 
 	private ReturnRow returnRow(Long id, boolean lock) {
 		List<ReturnRow> values = jdbc.query("""
-				SELECT id,modalidad,costo,moneda,estado,pago_id FROM app_consignacion_devoluciones WHERE solicitud_id=?
+				SELECT id,modalidad,costo,moneda,estado,pago_id,direccion_envio_id,direccion,piso,codigo_postal,
+					localidad,provincia FROM app_consignacion_devoluciones WHERE solicitud_id=?
 				""" + (lock ? " FOR UPDATE" : ""), (rs, row) -> new ReturnRow(rs.getLong("id"),
 						rs.getString("modalidad"), rs.getBigDecimal("costo"), rs.getString("moneda"), rs.getString("estado"),
-						(Long) rs.getObject("pago_id")), id);
+						(Long) rs.getObject("pago_id"), (Long) rs.getObject("direccion_envio_id"),
+						rs.getString("direccion"), rs.getString("piso"), rs.getString("codigo_postal"),
+						rs.getString("localidad"), rs.getString("provincia")), id);
 		return values.isEmpty() ? null : values.get(0);
 	}
 
 	private ConsignmentDtos.Return returnDto(ReturnRow value) {
 		return value == null ? null : new ConsignmentDtos.Return(value.id(), value.modality(), value.cost(),
-				value.currency(), value.state(), value.paymentId());
+				value.currency(), value.state(), value.paymentId(), value.addressId(), addressSummary(value));
+	}
+
+	private String addressSummary(ReturnRow value) {
+		if (value.address() == null) return null;
+		return value.address() + (value.floor() == null ? "" : ", " + value.floor()) + ", "
+				+ value.locality() + ", " + value.province() + " (" + value.postalCode() + ")";
 	}
 
 	private Liquidation liquidationOrNull(Long id) {
@@ -945,7 +979,8 @@ public class ConsignmentService {
 	private record SegmentAndCategory(String segment, String category) {
 	}
 
-	private record ReturnRow(Long id, String modality, BigDecimal cost, String currency, String state, Long paymentId) {
+	private record ReturnRow(Long id, String modality, BigDecimal cost, String currency, String state, Long paymentId,
+			Long addressId, String address, String floor, String postalCode, String locality, String province) {
 	}
 
 	private record PaymentMethod(Long accountId, String type, String currency, String state, BigDecimal limit,

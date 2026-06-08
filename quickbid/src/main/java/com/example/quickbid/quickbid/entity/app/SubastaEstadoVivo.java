@@ -26,6 +26,9 @@ public class SubastaEstadoVivo {
 	@Column(name = "usuarios_conectados", nullable = false)
 	private Integer usuariosConectados;
 
+	@Column(name = "retencion_hasta")
+	private OffsetDateTime retencionHasta;
+
 	@Column(name = "updated_at", nullable = false)
 	private OffsetDateTime updatedAt;
 
@@ -38,5 +41,9 @@ public class SubastaEstadoVivo {
 
 	public Long getVersion() {
 		return version;
+	}
+
+	public OffsetDateTime getRetencionHasta() {
+		return retencionHasta;
 	}
 }

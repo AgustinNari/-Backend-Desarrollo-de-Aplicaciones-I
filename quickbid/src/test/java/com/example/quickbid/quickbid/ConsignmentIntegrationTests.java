@@ -1,6 +1,7 @@
 package com.example.quickbid.quickbid;
 
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -442,6 +443,32 @@ class ConsignmentIntegrationTests {
 				SELECT COUNT(*) FROM app_documentos
 				WHERE referencia_tipo='consignacion' AND referencia_id=16007 AND tipo='liquidacion_venta'
 				"""));
+	}
+
+	@Test void devolucionPermiteDireccionGuardadaPropiaYMantieneSnapshot() throws Exception {
+		Long id = rejectedReturn();
+		jdbc.update("""
+				INSERT INTO app_direcciones_envio(id,cuenta_id,alias,destinatario,calle,numero,codigo_postal,
+					localidad,provincia,pais,telefono,principal)
+				VALUES (5190,3004,'Casa consignador','Diego Oro','Calle Oro','90','C9000',
+					'Buenos Aires','Buenos Aires','Argentina','1144445555',true)
+				""");
+
+		request(post("/api/consignaciones/" + id + "/devolucion").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"modalidad\":\"envio\",\"direccionEnvioId\":5190}"), "oro@quickbid.demo")
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.data.direccionEnvioId").value(5190))
+				.andExpect(jsonPath("$.data.direccionResumen", containsString("Calle Oro 90")));
+		assertEquals("Calle Oro 90", jdbc.queryForObject(
+				"SELECT direccion FROM app_consignacion_devoluciones WHERE solicitud_id=?", String.class, id));
+	}
+
+	@Test void devolucionRechazaDireccionGuardadaAjena() throws Exception {
+		Long id = rejectedReturn();
+		request(post("/api/consignaciones/" + id + "/devolucion").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"modalidad\":\"envio\",\"direccionEnvioId\":5101}"), "oro@quickbid.demo")
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_OWNED"));
 	}
 
 	@Test void listadoSoportaFiltrosActivasRechazadasYVendidas() throws Exception {

@@ -276,7 +276,7 @@ public class AdminService {
 		if (!auctionQueries.existsAuctionItem(id, itemId)) throw bad("El item no pertenece a la subasta", "INVALID_AUCTION_ITEM");
 		jdbc.update("""
 				UPDATE app_subasta_estado_vivo SET item_catalogo_activo_id=?,version=version+1,
-					lote_iniciado_at=CURRENT_TIMESTAMP,lote_finaliza_estimado_at=?,
+					lote_iniciado_at=CURRENT_TIMESTAMP,retencion_hasta=NULL,lote_finaliza_estimado_at=?,
 					proximo_lote_programado_at=NULL,subasta_finaliza_programado_at=NULL,updated_at=CURRENT_TIMESTAMP
 				WHERE subasta_id=?
 				""", itemId, OffsetDateTime.now().plusSeconds(60), id);

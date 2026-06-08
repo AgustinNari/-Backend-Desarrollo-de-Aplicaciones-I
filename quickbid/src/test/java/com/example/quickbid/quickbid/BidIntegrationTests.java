@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -124,6 +125,17 @@ class BidIntegrationTests {
 		assertEquals(901, jdbc.queryForObject("SELECT puntos FROM app_cuentas WHERE id=3001", Integer.class));
 		assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM app_movimientos_puntos WHERE motivo='puja_aceptada' AND referencia_id=?", Integer.class, bidId));
 		assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM app_subasta_estado_vivo WHERE subasta_id=6001 AND lote_finaliza_estimado_at IS NOT NULL", Integer.class));
+		assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM app_subasta_estado_vivo WHERE subasta_id=6001 AND retencion_hasta>CURRENT_TIMESTAMP", Integer.class));
+		authGet("aprobado@quickbid.demo", 6001)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.retencionHasta").exists())
+				.andExpect(jsonPath("$.data.segundosRestantes").isNumber())
+				.andExpect(jsonPath("$.data.miPujaGanadora").value(true))
+				.andExpect(jsonPath("$.data.serverNow").exists());
+		authGet("multa@quickbid.demo", 6001)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.miPujaGanadora").value(false))
+				.andExpect(jsonPath("$.data.mejorPostorId").doesNotExist());
 	}
 
 	@Test void versionObsoletaSeRechazaYAudita() throws Exception {
@@ -434,6 +446,11 @@ class BidIntegrationTests {
 		return mvc.perform(post("/api/subastas/{id}/pujar", auctionId)
 				.header("Authorization", "Bearer " + token(email))
 				.contentType(MediaType.APPLICATION_JSON).content(body));
+	}
+
+	private ResultActions authGet(String email, int auctionId) throws Exception {
+		return mvc.perform(get("/api/subastas/{id}/puja-actual", auctionId)
+				.header("Authorization", "Bearer " + token(email)));
 	}
 
 	private String bid(int itemId, String amount, long paymentId, long version, String key) {

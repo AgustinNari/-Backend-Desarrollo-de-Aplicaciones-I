@@ -122,6 +122,16 @@ Content-Type: application/json
   "telefonoContacto": "+54 11 5555 0202"
 }
 
+### F1 alternativa - Seleccionar devolucion con direccion guardada
+POST {{baseUrl}}/api/consignaciones/{{consignacionDevolucionId}}/devolucion
+Authorization: Bearer {{consignadorAccessToken}}
+Content-Type: application/json
+
+{
+  "modalidad": "envio",
+  "direccionEnvioId": {{direccionEnvioConsignadorId}}
+}
+
 ### F2 - Seed 16006 - Pagar envio de devolucion
 POST {{baseUrl}}/api/consignaciones/{{consignacionDevolucionId}}/devolucion/pagar-envio
 Authorization: Bearer {{accessConsignador}}
