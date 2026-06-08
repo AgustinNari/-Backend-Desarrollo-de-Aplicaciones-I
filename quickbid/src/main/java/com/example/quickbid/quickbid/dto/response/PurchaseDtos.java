@@ -21,6 +21,10 @@ public final class PurchaseDtos {
 			Boolean perdioCoberturaSeguro, String direccionSnapshotJson, OffsetDateTime direccionSnapshotAt) {
 	}
 
+	public record DeliveryPreview(String tipo, Long direccionEnvioId, BigDecimal costoEnvio, String moneda,
+			BigDecimal comisionComprador, BigDecimal totalEstimado) {
+	}
+
 	public record Fine(Long id, BigDecimal monto, String moneda, String estado, OffsetDateTime venceAt,
 			OffsetDateTime paidAt) {
 	}

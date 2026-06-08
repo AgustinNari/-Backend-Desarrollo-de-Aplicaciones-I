@@ -34,6 +34,10 @@ public final class ConsignmentDtos {
 			Long direccionEnvioId, String direccionResumen) {
 	}
 
+	public record ReturnPreview(String modalidad, Long direccionEnvioId, BigDecimal costo, String moneda,
+			BigDecimal totalEstimado, String direccionResumen) {
+	}
+
 	public record ReturnPayment(Long id, Long devolucionId, Long medioPagoId, BigDecimal monto, String moneda,
 			String estado, Boolean idempotentReplay) {
 	}

@@ -100,6 +100,22 @@ public class PurchaseService {
 		return reads.findAvailableDocuments(purchaseId);
 	}
 
+	@Transactional(readOnly = true)
+	public PurchaseDtos.DeliveryPreview previewDelivery(Long accountId, Long purchaseId, PurchaseDeliveryRequest request) {
+		Purchase purchase = ownedPurchase(accountId, purchaseId, false);
+		if (!purchase.state().equals("pagos_extra_pendientes")) {
+			throw conflict("La compra no admite configurar entrega", "INVALID_STATE_TRANSITION");
+		}
+		Long addressId = null;
+		BigDecimal cost = BigDecimal.ZERO;
+		if (request.tipo().equals("envio")) {
+			addressId = shippingAddress(accountId, request.direccionEnvioId());
+			cost = shippingFlatCost;
+		}
+		return new PurchaseDtos.DeliveryPreview(request.tipo(), addressId, cost, purchase.currency(),
+				purchase.buyerCommission(), purchase.buyerCommission().add(cost));
+	}
+
 	@Transactional
 	public PurchaseDtos.Delivery configureDelivery(Long accountId, Long purchaseId, PurchaseDeliveryRequest request) {
 		Purchase purchase = ownedPurchase(accountId, purchaseId, true);

@@ -17,6 +17,7 @@ import com.example.quickbid.quickbid.dto.request.PurchasePaymentRequest;
 import com.example.quickbid.quickbid.dto.response.ApiResponse;
 import com.example.quickbid.quickbid.dto.response.PurchaseDtos;
 import com.example.quickbid.quickbid.dto.response.PurchaseDtos.Detail;
+import com.example.quickbid.quickbid.dto.response.PurchaseDtos.DeliveryPreview;
 import com.example.quickbid.quickbid.dto.response.PurchaseDtos.Document;
 import com.example.quickbid.quickbid.dto.response.PurchaseDtos.Page;
 import com.example.quickbid.quickbid.dto.response.PurchaseDtos.Payment;
@@ -50,6 +51,13 @@ public class PurchaseController {
 			@Valid @RequestBody PurchaseDeliveryRequest request) {
 		return ApiResponse.success(purchases.configureDelivery(accountId(authentication), id, request),
 				"Entrega configurada");
+	}
+
+	@PostMapping("/{id}/entrega/preview")
+	public ApiResponse<DeliveryPreview> deliveryPreview(Authentication authentication, @PathVariable Long id,
+			@Valid @RequestBody PurchaseDeliveryRequest request) {
+		return ApiResponse.success(purchases.previewDelivery(accountId(authentication), id, request),
+				"Cotizacion de entrega");
 	}
 
 	@PostMapping("/{id}/pagar")

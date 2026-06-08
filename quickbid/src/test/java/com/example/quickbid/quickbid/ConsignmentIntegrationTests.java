@@ -364,6 +364,46 @@ class ConsignmentIntegrationTests {
 				""", id));
 	}
 
+	@Test void previewDevolucionCotizaEnvioYRetirosSinMutar() throws Exception {
+		Long id = rejectedReturn();
+		request(post("/api/consignaciones/" + id + "/devolucion/preview").contentType(MediaType.APPLICATION_JSON)
+				.content("""
+						{"modalidad":"envio","direccion":"Av. Demo 400","codigoPostal":"C1000",
+						"localidad":"Buenos Aires","provincia":"Buenos Aires"}
+						"""), "oro@quickbid.demo").andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.modalidad").value("envio"))
+				.andExpect(jsonPath("$.data.costo").value(12000))
+				.andExpect(jsonPath("$.data.moneda").value("ARS"))
+				.andExpect(jsonPath("$.data.totalEstimado").value(12000))
+				.andExpect(jsonPath("$.data.direccionResumen", containsString("Av. Demo 400")));
+		assertEquals(1, count("""
+				SELECT COUNT(*) FROM app_consignacion_devoluciones
+				WHERE solicitud_id=? AND modalidad IS NULL AND estado='pendiente_decision' AND costo=0
+				""", id));
+
+		request(post("/api/consignaciones/" + id + "/devolucion/preview").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"modalidad\":\"retiro\"}"), "oro@quickbid.demo").andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.modalidad").value("retiro"))
+				.andExpect(jsonPath("$.data.costo").value(0))
+				.andExpect(jsonPath("$.data.totalEstimado").value(0));
+		assertEquals(1, count("""
+				SELECT COUNT(*) FROM app_consignacion_devoluciones
+				WHERE solicitud_id=? AND modalidad IS NULL AND estado='pendiente_decision' AND costo=0
+				""", id));
+	}
+
+	@Test void previewDevolucionInexistenteOAjenaDevuelveErroresUniformes() throws Exception {
+		Long id = rejectedReturn();
+		request(post("/api/consignaciones/99999/devolucion/preview").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"modalidad\":\"retiro\"}"), "oro@quickbid.demo")
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_FOUND"));
+		request(post("/api/consignaciones/" + id + "/devolucion/preview").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"modalidad\":\"retiro\"}"), "aprobado@quickbid.demo")
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_OWNED"));
+	}
+
 	@Test void devolucionYPagoEnvioConRecursosInvalidosDevuelvenErroresUniformes() throws Exception {
 		Long id = rejectedReturn();
 		request(post("/api/consignaciones/16001/devolucion").contentType(MediaType.APPLICATION_JSON)

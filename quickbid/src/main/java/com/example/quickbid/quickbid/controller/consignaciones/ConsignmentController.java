@@ -26,6 +26,7 @@ import com.example.quickbid.quickbid.dto.response.ConsignmentDtos.Page;
 import com.example.quickbid.quickbid.dto.response.ConsignmentDtos.Requirements;
 import com.example.quickbid.quickbid.dto.response.ConsignmentDtos.Return;
 import com.example.quickbid.quickbid.dto.response.ConsignmentDtos.ReturnPayment;
+import com.example.quickbid.quickbid.dto.response.ConsignmentDtos.ReturnPreview;
 import com.example.quickbid.quickbid.dto.response.ConsignmentDtos.Summary;
 import com.example.quickbid.quickbid.service.ConsignmentService;
 
@@ -106,6 +107,13 @@ public class ConsignmentController {
 			@Valid @RequestBody ConsignmentReturnRequest request) {
 		return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(
 				consignments.selectReturn(accountId(authentication), id, request), "Devolucion registrada"));
+	}
+
+	@PostMapping("/{id}/devolucion/preview")
+	public ApiResponse<ReturnPreview> returnPreview(Authentication authentication, @PathVariable Long id,
+			@Valid @RequestBody ConsignmentReturnRequest request) {
+		return ApiResponse.success(consignments.previewReturn(accountId(authentication), id, request),
+				"Cotizacion de devolucion");
 	}
 
 	@PostMapping("/{id}/devolucion/pagar-envio")

@@ -288,6 +288,50 @@ public class ConsignmentService {
 		return returnDto(returnRow(id, false));
 	}
 
+	@Transactional(readOnly = true)
+	public ConsignmentDtos.ReturnPreview previewReturn(Long accountId, Long id, ConsignmentReturnRequest request) {
+		Consignment value = owned(accountId, id, false);
+		if (!value.state().equals("devolucion_pendiente") || value.productId() != null) {
+			throw conflict("La devolucion no puede gestionarse en este estado", "INVALID_STATE_TRANSITION");
+		}
+		ReturnRow returnValue = returnRow(id, false);
+		if (returnValue == null || !returnValue.state().equals("pendiente_decision")) {
+			throw conflict("La devolucion ya fue gestionada", "INVALID_STATE_TRANSITION");
+		}
+		String modality = request.modalidad().trim().toLowerCase();
+		if (!Set.of("envio", "retiro").contains(modality)) throw bad("Modalidad invalida", "INVALID_RETURN_METHOD");
+		Long addressId = null;
+		String summary = null;
+		if (modality.equals("envio")) {
+			if (request.direccionEnvioId() != null) {
+				DireccionEnvio selected = addresses.findById(request.direccionEnvioId())
+						.orElseThrow(() -> notFound("Direccion de envio inexistente"));
+				if (!selected.getCuentaId().equals(accountId) || selected.getDeletedAt() != null) {
+					throw forbidden("La direccion no pertenece al usuario", "RESOURCE_NOT_OWNED");
+				}
+				addressId = selected.getId();
+				summary = selected.getCalle() + " " + selected.getNumero()
+						+ (selected.getPiso() == null ? "" : ", " + selected.getPiso())
+						+ ", " + selected.getLocalidad() + ", " + selected.getProvincia()
+						+ " (" + selected.getCodigoPostal() + ")";
+			} else {
+				String address = blankToNull(request.direccion());
+				String floor = blankToNull(request.piso());
+				String postalCode = blankToNull(request.codigoPostal());
+				String locality = blankToNull(request.localidad());
+				String province = blankToNull(request.provincia());
+				required(address, "direccion");
+				required(postalCode, "codigoPostal");
+				required(locality, "localidad");
+				required(province, "provincia");
+				summary = address + (floor == null ? "" : ", " + floor) + ", " + locality + ", " + province
+						+ " (" + postalCode + ")";
+			}
+		}
+		BigDecimal cost = modality.equals("envio") ? returnShippingCost : BigDecimal.ZERO;
+		return new ConsignmentDtos.ReturnPreview(modality, addressId, cost, returnValue.currency(), cost, summary);
+	}
+
 	@Transactional
 	public ReturnPayment payReturnShipping(Long accountId, Long id, ConsignmentReturnPaymentRequest request) {
 		owned(accountId, id, true);

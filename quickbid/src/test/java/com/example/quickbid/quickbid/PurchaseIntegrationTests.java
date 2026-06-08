@@ -233,6 +233,37 @@ class PurchaseIntegrationTests {
 				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_FOUND"));
 	}
 
+	@Test void previewEntregaCotizaEnvioYRetirosSinMutar() throws Exception {
+		auth(post("/api/compras/13002/entrega/preview").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"tipo\":\"envio\",\"direccionEnvioId\":5101}"), "aprobado@quickbid.demo")
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.tipo").value("envio"))
+				.andExpect(jsonPath("$.data.costoEnvio").value(5000))
+				.andExpect(jsonPath("$.data.moneda").value("ARS"))
+				.andExpect(jsonPath("$.data.comisionComprador").value(9500))
+				.andExpect(jsonPath("$.data.totalEstimado").value(14500));
+		assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM app_entregas WHERE compra_id=13002", Integer.class));
+
+		auth(post("/api/compras/13002/entrega/preview").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"tipo\":\"retiro\"}"), "aprobado@quickbid.demo")
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.tipo").value("retiro"))
+				.andExpect(jsonPath("$.data.costoEnvio").value(0))
+				.andExpect(jsonPath("$.data.totalEstimado").value(9500));
+		assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM app_entregas WHERE compra_id=13002", Integer.class));
+	}
+
+	@Test void previewEntregaInexistenteOAjenaDevuelveErroresUniformes() throws Exception {
+		auth(post("/api/compras/99999/entrega/preview").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"tipo\":\"retiro\"}"), "aprobado@quickbid.demo")
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_FOUND"));
+		auth(post("/api/compras/13001/entrega/preview").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"tipo\":\"retiro\"}"), "aprobado@quickbid.demo")
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_OWNED"));
+	}
+
 	@Test void entregaPorEnvioYPagoExtrasDejanEntregaPendiente() throws Exception {
 		auth(put("/api/compras/13002/entrega").contentType(MediaType.APPLICATION_JSON)
 				.content("{\"tipo\":\"envio\",\"direccionEnvioId\":5101}"), "aprobado@quickbid.demo")
