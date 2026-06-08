@@ -64,7 +64,7 @@ public class AuthController {
 	@PostMapping("/registro/etapa3")
 	public ApiResponse<Map<String, Object>> etapa3(@RequestBody PasswordChange r) {
 		return ApiResponse.success(
-				auth.etapa3(r.setup(), r.clave(), r.confirmacion()),
+				auth.etapa3(r.setup(), r.nueva(), r.confirmacion()),
 				"Cuenta creada");
 	}
 
