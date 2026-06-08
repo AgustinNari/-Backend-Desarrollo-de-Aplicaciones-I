@@ -97,8 +97,14 @@ public class SubastaService {
 		filter(where, args, "e.moneda", normalizedCurrency);
 		if (fechaDesde != null) { where.append(" AND s.fecha>=?"); args.add(fechaDesde); }
 		if (fechaHasta != null) { where.append(" AND s.fecha<=?"); args.add(fechaHasta); }
-		if (q != null && !q.isBlank()) { where.append(" AND LOWER(e.titulo) LIKE ?"); args.add("%" + q.toLowerCase(Locale.ROOT) + "%"); }
-		long total = jdbc.queryForObject("SELECT COUNT(*) FROM subastas s JOIN app_subasta_ext e ON e.subasta_id=s.identificador" + where, Long.class, args.toArray());
+		if (q != null && !q.isBlank()) {
+			where.append(" AND LOWER(e.titulo) LIKE ?");
+			args.add("%" + q.toLowerCase(Locale.ROOT) + "%");
+		}
+		long total = jdbc.queryForObject(
+				"SELECT COUNT(*) FROM subastas s JOIN app_subasta_ext e ON e.subasta_id=s.identificador" + where,
+				Long.class,
+				args.toArray());
 		args.add(size); args.add(page * size);
 		List<?> content = jdbc.query(AUCTION_SELECT + where + " ORDER BY s.fecha,s.hora LIMIT ? OFFSET ?",
 				(rs, row) -> summary(auction(rs), authenticated), args.toArray());
@@ -171,9 +177,15 @@ public class SubastaService {
 	public Registration enroll(Long cuentaId, Integer subastaId, Long medioPagoId) {
 		CuentaApp cuenta = account(cuentaId);
 		Auction auction = auction(subastaId);
-		if (!cuenta.getEstado().equals("activa")) throw forbidden("La cuenta no puede inscribirse", "ACCOUNT_RESTRICTED_BY_FINE");
-		if (categoryOrder(cuenta.getCategoriaCalculada()) < categoryOrder(auction.categoria())) throw forbidden("Categoria insuficiente", "AUCTION_CATEGORY_FORBIDDEN");
-		if (!enrollmentOpen(auction)) throw conflict("La inscripcion ya cerro", "AUCTION_ENROLLMENT_CLOSED");
+		if (!cuenta.getEstado().equals("activa")) {
+			throw forbidden("La cuenta no puede inscribirse", "ACCOUNT_RESTRICTED_BY_FINE");
+		}
+		if (categoryOrder(cuenta.getCategoriaCalculada()) < categoryOrder(auction.categoria())) {
+			throw forbidden("Categoria insuficiente", "AUCTION_CATEGORY_FORBIDDEN");
+		}
+		if (!enrollmentOpen(auction)) {
+			throw conflict("La inscripcion ya cerro", "AUCTION_ENROLLMENT_CLOSED");
+		}
 		var existing = inscripciones.findFirstBySubastaIdAndCuentaIdAndEstadoInOrderByCreatedAtDesc(
 				subastaId, cuentaId, ACTIVE_ENROLLMENT_STATES);
 		if (existing.isPresent()) return registration(existing.get(), true);

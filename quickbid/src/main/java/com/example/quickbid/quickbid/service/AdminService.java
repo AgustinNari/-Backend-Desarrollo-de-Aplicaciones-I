@@ -355,18 +355,65 @@ public class AdminService {
 		return queries.findConsignments();
 	}
 
-	public void requestDocuments(Long id, Integer employeeId) { consignments.requestOriginDocuments(id, employeeId); }
-	public void rejectConsignment(Long id, String reason, Integer employeeId) { consignments.rejectDigitalReview(id, employeeId, reason); }
-	public void approveDigitalReview(Long id, Integer employeeId) { consignments.approveDigitalReview(id, employeeId); }
-	public void reviewDocuments(Long id, boolean approved, String reason, Integer employeeId) { consignments.reviewOriginDocuments(id, employeeId, approved, reason); }
-	public void markPhysicalReception(Long id, Integer employeeId) { consignments.markPhysicalReception(id, employeeId); }
-	public void approvePhysicalReview(Long id, Integer employeeId) { consignments.approvePhysicalReview(id, employeeId); }
-	public void rejectPhysicalReview(Long id, String reason, Integer employeeId) { consignments.rejectPhysicalReview(id, employeeId, reason); }
-	public Integer verifyOwner(Long accountId, boolean financial, boolean judicial, int risk, Integer employeeId) { return consignments.verifyConsignor(accountId, employeeId, financial, judicial, risk); }
-	public void proposeAgreement(Long id, Agreement request, Integer employeeId) { consignments.proposeAgreement(id, employeeId, request.valorBase(), request.moneda(), request.comisionCompradorPct(), request.comisionVendedorPct(), request.condiciones()); }
-	public Integer assignAuction(Long id, AssignAuction request, Integer employeeId) { return consignments.assignAuctionAndInsurance(id, employeeId, request.subastaId(), request.catalogoId(), request.polizaCombinada()); }
-	public Liquidation liquidate(Long id, Long paymentMethodId, Integer employeeId) { return consignments.liquidate(id, employeeId, paymentMethodId); }
-	public void markReturnIncomplete(Long id, Integer employeeId) { consignments.markReturnIncomplete(id, employeeId); }
+	public void requestDocuments(Long id, Integer employeeId) {
+		consignments.requestOriginDocuments(id, employeeId);
+	}
+
+	public void rejectConsignment(Long id, String reason, Integer employeeId) {
+		consignments.rejectDigitalReview(id, employeeId, reason);
+	}
+
+	public void approveDigitalReview(Long id, Integer employeeId) {
+		consignments.approveDigitalReview(id, employeeId);
+	}
+
+	public void reviewDocuments(Long id, boolean approved, String reason, Integer employeeId) {
+		consignments.reviewOriginDocuments(id, employeeId, approved, reason);
+	}
+
+	public void markPhysicalReception(Long id, Integer employeeId) {
+		consignments.markPhysicalReception(id, employeeId);
+	}
+
+	public void approvePhysicalReview(Long id, Integer employeeId) {
+		consignments.approvePhysicalReview(id, employeeId);
+	}
+
+	public void rejectPhysicalReview(Long id, String reason, Integer employeeId) {
+		consignments.rejectPhysicalReview(id, employeeId, reason);
+	}
+
+	public Integer verifyOwner(Long accountId, boolean financial, boolean judicial, int risk, Integer employeeId) {
+		return consignments.verifyConsignor(accountId, employeeId, financial, judicial, risk);
+	}
+
+	public void proposeAgreement(Long id, Agreement request, Integer employeeId) {
+		consignments.proposeAgreement(
+				id,
+				employeeId,
+				request.valorBase(),
+				request.moneda(),
+				request.comisionCompradorPct(),
+				request.comisionVendedorPct(),
+				request.condiciones());
+	}
+
+	public Integer assignAuction(Long id, AssignAuction request, Integer employeeId) {
+		return consignments.assignAuctionAndInsurance(
+				id,
+				employeeId,
+				request.subastaId(),
+				request.catalogoId(),
+				request.polizaCombinada());
+	}
+
+	public Liquidation liquidate(Long id, Long paymentMethodId, Integer employeeId) {
+		return consignments.liquidate(id, employeeId, paymentMethodId);
+	}
+
+	public void markReturnIncomplete(Long id, Integer employeeId) {
+		consignments.markReturnIncomplete(id, employeeId);
+	}
 
 	public Status seed(String scope, Integer employeeId) {
 		requireDevOrTest();
@@ -402,10 +449,34 @@ public class AdminService {
 		return value == null || value.isBlank() ? null : value.trim().toLowerCase();
 	}
 
-	private CuentaApp account(Long id) { return accounts.findById(id).orElseThrow(() -> notFound("Cuenta inexistente")); }
-	private AdminDtos.Registration registration(com.example.quickbid.quickbid.entity.app.SolicitudRegistro value) { return new AdminDtos.Registration(value.getId(), value.getEmail(), value.getNombre(), value.getApellido(), value.getEstado(), value.getMotivoRechazo(), value.getPersonaId(), value.getClienteId()); }
-	private Account account(CuentaApp value) { return new Account(value.getId(), value.getEmail(), value.getEstado(), value.getPuntos(), value.getCategoriaCalculada()); }
-	private void audit(Integer employeeId, String action, String entity, Long id) { audit.record(new AuditEvent("admin", employeeId.longValue(), action, entity, id, "{}")); }
+	private CuentaApp account(Long id) {
+		return accounts.findById(id).orElseThrow(() -> notFound("Cuenta inexistente"));
+	}
+
+	private AdminDtos.Registration registration(com.example.quickbid.quickbid.entity.app.SolicitudRegistro value) {
+		return new AdminDtos.Registration(
+				value.getId(),
+				value.getEmail(),
+				value.getNombre(),
+				value.getApellido(),
+				value.getEstado(),
+				value.getMotivoRechazo(),
+				value.getPersonaId(),
+				value.getClienteId());
+	}
+
+	private Account account(CuentaApp value) {
+		return new Account(
+				value.getId(),
+				value.getEmail(),
+				value.getEstado(),
+				value.getPuntos(),
+				value.getCategoriaCalculada());
+	}
+
+	private void audit(Integer employeeId, String action, String entity, Long id) {
+		audit.record(new AuditEvent("admin", employeeId.longValue(), action, entity, id, "{}"));
+	}
 
 	private long insert(String sql, String column, SqlBinder binder) {
 		GeneratedKeyHolder keys = new GeneratedKeyHolder();
