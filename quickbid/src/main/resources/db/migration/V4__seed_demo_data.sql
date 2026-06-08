@@ -109,7 +109,7 @@ INSERT INTO subastas (
     (
         6001,
         CURRENT_DATE,
-        TIME '09:30',
+        TIME '10:00',
         'abierta',
         (SELECT identificador FROM personas WHERE documento = 'EMPRESA-SUB-001'),
         'Casa central QuickBid',
