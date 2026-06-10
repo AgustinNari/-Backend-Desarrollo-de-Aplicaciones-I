@@ -42,6 +42,12 @@ public final class PurchaseDtos {
 
 	public record LotClosedEvent(String tipo, Integer subastaId, Integer itemCatalogoId, Long compraId,
 			Long pujaGanadoraId, BigDecimal montoAdjudicacion, String moneda, Boolean compradorEmpresa,
-			Long versionEstado) {
+			Long versionEstado, OffsetDateTime proximoLoteProgramadoAt, OffsetDateTime subastaFinalizaProgramadoAt) {
+		public LotClosedEvent(String tipo, Integer subastaId, Integer itemCatalogoId, Long compraId,
+				Long pujaGanadoraId, BigDecimal montoAdjudicacion, String moneda, Boolean compradorEmpresa,
+				Long versionEstado) {
+			this(tipo, subastaId, itemCatalogoId, compraId, pujaGanadoraId, montoAdjudicacion, moneda, compradorEmpresa,
+					versionEstado, null, null);
+		}
 	}
 }

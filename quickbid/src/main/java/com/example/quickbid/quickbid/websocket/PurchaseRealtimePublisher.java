@@ -36,7 +36,7 @@ public class PurchaseRealtimePublisher {
 			messages.convertAndSendToUser(buyerAccountId.toString(), "/queue/notificaciones",
 					new LotClosedEvent("LOTE_GANADO", event.subastaId(), event.itemCatalogoId(), event.compraId(),
 							event.pujaGanadoraId(), event.montoAdjudicacion(), event.moneda(), event.compradorEmpresa(),
-							event.versionEstado()));
+							event.versionEstado(), event.proximoLoteProgramadoAt(), event.subastaFinalizaProgramadoAt()));
 		}
 	}
 

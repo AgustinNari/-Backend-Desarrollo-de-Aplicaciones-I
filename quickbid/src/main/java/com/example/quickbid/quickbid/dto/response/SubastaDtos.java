@@ -113,7 +113,11 @@ public final class SubastaDtos {
 		}
 	}
 
-	public record AuctionLifecycleEvent(String tipo, Integer subastaId, Integer itemCatalogoId, Long versionEstado) {
+	public record AuctionLifecycleEvent(String tipo, Integer subastaId, Integer itemCatalogoId, Long versionEstado,
+			OffsetDateTime loteFinalizaEstimadoAt) {
+		public AuctionLifecycleEvent(String tipo, Integer subastaId, Integer itemCatalogoId, Long versionEstado) {
+			this(tipo, subastaId, itemCatalogoId, versionEstado, null);
+		}
 	}
 
 	public record RejectedBidEvent(String tipo, Integer subastaId, Integer itemCatalogoId, String code,
