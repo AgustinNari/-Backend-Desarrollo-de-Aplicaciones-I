@@ -106,10 +106,55 @@ INSERT INTO subastas (
     identificador, fecha, hora, estado, subastador, ubicacion,
     "capacidadAsistentes", "tieneDeposito", "seguridadPropia", categoria
 ) VALUES
-    (6001, CURRENT_DATE + 30, '18:00', 'abierta', (SELECT identificador FROM personas WHERE documento = 'EMPRESA-SUB-001'), 'Casa central QuickBid', 100, 'si', 'si', 'plata'),
-    (6002, CURRENT_DATE + 45, '19:00', 'abierta', (SELECT identificador FROM personas WHERE documento = 'EMPRESA-SUB-001'), 'Casa central QuickBid', 80, 'si', 'si', 'especial'),
-    (6003, CURRENT_DATE + 20, '17:00', 'cerrada', (SELECT identificador FROM personas WHERE documento = 'EMPRESA-SUB-001'), 'Casa central QuickBid', 100, 'si', 'si', 'comun'),
-    (6004, CURRENT_DATE + 60, '20:00', 'abierta', (SELECT identificador FROM personas WHERE documento = 'EMPRESA-SUB-001'), 'Salón Oro QuickBid', 50, 'si', 'si', 'oro');
+    (
+        6001,
+        CURRENT_DATE,
+        TIME '09:30',
+        'abierta',
+        (SELECT identificador FROM personas WHERE documento = 'EMPRESA-SUB-001'),
+        'Casa central QuickBid',
+        100,
+        'si',
+        'si',
+        'plata'
+    ),
+    (
+        6002,
+        CURRENT_DATE + 45,
+        TIME '19:00',
+        'abierta',
+        (SELECT identificador FROM personas WHERE documento = 'EMPRESA-SUB-001'),
+        'Casa central QuickBid',
+        80,
+        'si',
+        'si',
+        'especial'
+    ),
+    (
+        6003,
+        CURRENT_DATE + 20,
+        TIME '17:00',
+        'cerrada',
+        (SELECT identificador FROM personas WHERE documento = 'EMPRESA-SUB-001'),
+        'Casa central QuickBid',
+        100,
+        'si',
+        'si',
+        'comun'
+    ),
+    (
+        6004,
+        CURRENT_DATE + 60,
+        TIME '20:00',
+        'abierta',
+        (SELECT identificador FROM personas WHERE documento = 'EMPRESA-SUB-001'),
+        'Salón Oro QuickBid',
+        50,
+        'si',
+        'si',
+        'oro'
+    );
+
 
 INSERT INTO app_subasta_ext (
     subasta_id, titulo, descripcion, moneda, segmento, estado_operativo

@@ -9,7 +9,7 @@ import org.springframework.messaging.MessagingException;
 import org.springframework.messaging.simp.stomp.StompCommand;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.messaging.support.ChannelInterceptor;
-import org.springframework.messaging.support.MessageBuilder;
+import org.springframework.messaging.support.MessageHeaderAccessor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.stereotype.Component;
 
@@ -33,12 +33,13 @@ public class WebSocketAuthChannelInterceptor implements ChannelInterceptor {
 
 	@Override
 	public Message<?> preSend(Message<?> message, MessageChannel channel) {
-		StompHeaderAccessor accessor = StompHeaderAccessor.wrap(message);
+		StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
+		if (accessor == null) return message;
 		if (accessor.getCommand() == StompCommand.CONNECT) authenticate(accessor);
 		if (accessor.getCommand() == StompCommand.SUBSCRIBE) authorizeSubscription(accessor);
 		if (accessor.getCommand() == StompCommand.DISCONNECT) connections.disconnected(accessor.getSessionId());
 		connections.touch(accessor.getSessionId());
-		return MessageBuilder.createMessage(message.getPayload(), accessor.getMessageHeaders());
+		return message;
 	}
 
 	private void authenticate(StompHeaderAccessor accessor) {
@@ -62,13 +63,18 @@ public class WebSocketAuthChannelInterceptor implements ChannelInterceptor {
 	}
 
 	private void authorizeSubscription(StompHeaderAccessor accessor) {
-		if (accessor.getUser() == null) {
-			throw new MessagingException("Autenticacion requerida para suscribirse");
-		}
+		Long accountId;
 		try {
-			subscriptions.authorize(Long.valueOf(accessor.getUser().getName()), accessor.getDestination());
+			if (accessor.getUser() != null) {
+				accountId = Long.valueOf(accessor.getUser().getName());
+			} else {
+				accountId = connections.accountId(accessor.getSessionId())
+						.orElseThrow(() -> new MessagingException("Autenticacion requerida para suscribirse"));
+				accessor.setUser(new UsernamePasswordAuthenticationToken(accountId, null, List.of()));
+			}
 		} catch (NumberFormatException exception) {
 			throw new MessagingException("Principal STOMP invalido");
 		}
+		subscriptions.authorize(accountId, accessor.getDestination());
 	}
 }

@@ -35,6 +35,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder;
 
+import com.example.quickbid.quickbid.security.AdminInternalAuthenticationFilter;
 import com.example.quickbid.quickbid.security.AuthRateLimitService;
 import com.jayway.jsonpath.JsonPath;
 
@@ -43,6 +44,7 @@ import com.jayway.jsonpath.JsonPath;
 @ActiveProfiles("test")
 @Sql(scripts = "/auth-test-data.sql", executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
 class MedioPagoIntegrationTests {
+	private static final String ADMIN_KEY = "test-admin-key";
 
 	@Autowired MockMvc mvc;
 	@Autowired JdbcTemplate jdbc;
@@ -261,6 +263,32 @@ class MedioPagoIntegrationTests {
 	}
 
 	@Test
+	void nuevoMedioVerificadoPuedeSerPrincipalSinAfectarOtraMoneda() throws Exception {
+		String created = request(post("/api/usuario/medios-pago").contentType(MediaType.APPLICATION_JSON)
+				.content(card("4000000000000002")), "aprobado@quickbid.demo")
+				.andExpect(status().isCreated())
+				.andReturn().getResponse().getContentAsString();
+		Number id = JsonPath.read(created, "$.data.id");
+
+		admin(post("/api/admin/medios-pago/" + id.longValue() + "/verificar")
+				.contentType(MediaType.APPLICATION_JSON).content("{\"limiteAprobado\":250000}"))
+				.andExpect(status().isOk());
+		request(patch("/api/usuario/medios-pago/" + id.longValue() + "/principal"), "aprobado@quickbid.demo")
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.principal").value(true));
+		request(patch("/api/usuario/medios-pago/" + id.longValue() + "/principal"), "aprobado@quickbid.demo")
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.principal").value(true));
+
+		assertEquals(1, jdbc.queryForObject("""
+				SELECT COUNT(*) FROM app_medios_pago
+				WHERE cuenta_id=3001 AND moneda='ARS' AND principal=true AND deleted_at IS NULL
+				""", Integer.class));
+		assertEquals(false, jdbc.queryForObject("SELECT principal FROM app_medios_pago WHERE id=5001", Boolean.class));
+		assertEquals(true, jdbc.queryForObject("SELECT principal FROM app_medios_pago WHERE id=5002", Boolean.class));
+	}
+
+	@Test
 	void principalAjenoEs403() throws Exception {
 		request(patch("/api/usuario/medios-pago/5004/principal"), "aprobado@quickbid.demo")
 				.andExpect(status().isForbidden())
@@ -312,6 +340,10 @@ class MedioPagoIntegrationTests {
 
 	private ResultActions request(MockMultipartHttpServletRequestBuilder builder, String email) throws Exception {
 		return mvc.perform(builder.header("Authorization", "Bearer " + token(email)));
+	}
+
+	private ResultActions admin(MockHttpServletRequestBuilder builder) throws Exception {
+		return mvc.perform(builder.header(AdminInternalAuthenticationFilter.HEADER, ADMIN_KEY));
 	}
 
 	private String token(String email) throws Exception {

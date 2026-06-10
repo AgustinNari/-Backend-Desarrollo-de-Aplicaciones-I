@@ -346,3 +346,16 @@ Tabla maestra del flujo completo, un registro por bien.
 - Aceptar acuerdo de consignación -> asegurar `duenios` -> crear `productos` -> vincular solicitud.
 - Publicar consignación en subasta/catálogo.
 - Liquidar consignación.
+
+---
+
+## Addendum post revisión de modelo de datos
+
+- `app_medios_pago` debe incluir `limite_aprobado` obligatorio al verificar/revalidar, `verificado_hasta`, estado `vencido`, baja lógica y estructura de consumo/reserva.
+- No interpretar `limite_aprobado = null` como sin límite.
+- Agregar `app_reservas_medio_pago` o equivalente para reservas temporales de puja ganadora: estados `activa`, `liberada`, `consumida`.
+- `app_direcciones_envio` debe soportar hasta 5 activas por cuenta, una principal y baja lógica.
+- Compras deben copiar snapshot de dirección al pagar extras.
+- Separar `segmento` y `categoriaSubasta`: segmento es rubro/tema; categoría de subasta es común/especial/plata/oro/platino.
+- `app_documentos`/`app_documentos_generados` debe cubrir factura de compra, recibo de multa, acuerdo de consignación, liquidación y comprobante de devolución.
+- `app_inscripciones_subasta` debe permitir reintento si una inscripción fue rechazada, por ejemplo evitando unicidad rígida para estados rechazados.

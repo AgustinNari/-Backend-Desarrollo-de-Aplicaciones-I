@@ -188,6 +188,20 @@ class SubastaIntegrationTests {
 				.andExpect(jsonPath("$.data.mediosPagoRevalidablesParaInscripcion[0].requiereRevalidacion").value(true));
 	}
 
+	@Test void inscripcionValidaConMedioVencido() throws Exception {
+		jdbc.update("""
+				INSERT INTO app_medios_pago(id,cuenta_id,tipo,moneda,estado,principal,nacional,alias_visible,titular,
+					hash_identificador,limite_monto,consumo_actual,verificado_hasta)
+				VALUES (5097,3001,'tarjeta','ARS','vencido',false,true,'Vencida','Ana','hash-vencida-subasta',
+					5000,0,DATEADD('DAY',-1,CURRENT_TIMESTAMP))
+				""");
+		futureAuction(6108, "ARS", "especial", LocalDateTime.now().plusDays(3), "programada", null);
+		request(post("/api/subastas/6108/inscribirse").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"medioPagoId\":5097}"), "aprobado@quickbid.demo").andExpect(status().isCreated())
+				.andExpect(jsonPath("$.data.estado").value("pendiente_validacion"))
+				.andExpect(jsonPath("$.data.requiereRevisionMedioPago").value(true));
+	}
+
 	@Test void inscripcionFallaConMedioRechazado() throws Exception {
 		jdbc.update("INSERT INTO app_medios_pago(id,cuenta_id,tipo,moneda,estado,principal,nacional,alias_visible,titular,hash_identificador,consumo_actual) VALUES (5098,3001,'tarjeta','ARS','rechazado',false,true,'Rechazada','Ana','hash-rejected',0)");
 		futureAuction(6103, "ARS", "especial", LocalDateTime.now().plusDays(3), "programada", null);
@@ -227,6 +241,21 @@ class SubastaIntegrationTests {
 				.andExpect(jsonPath("$.data.existente").value(true));
 	}
 
+	@Test void inscripcionRechazadaPermiteReintentoConOtroMedio() throws Exception {
+		futureAuction(6109, "ARS", "especial", LocalDateTime.now().plusDays(3), "programada", null);
+		jdbc.update("""
+				INSERT INTO app_inscripciones_subasta(subasta_id,cuenta_id,medio_pago_id,estado)
+				VALUES (6109,3001,5001,'rechazada')
+				""");
+		request(post("/api/subastas/6109/inscribirse").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"medioPagoId\":5003}"), "aprobado@quickbid.demo").andExpect(status().isCreated())
+				.andExpect(jsonPath("$.data.estado").value("pendiente_validacion"))
+				.andExpect(jsonPath("$.data.existente").value(false));
+		assertEquals(2, jdbc.queryForObject("""
+				SELECT COUNT(*) FROM app_inscripciones_subasta WHERE subasta_id=6109 AND cuenta_id=3001
+				""", Integer.class));
+	}
+
 	@Test void inscripcionNoCreaAsistenteLegacy() throws Exception {
 		int before = jdbc.queryForObject("SELECT COUNT(*) FROM asistentes", Integer.class);
 		request(post("/api/subastas/6002/inscribirse").contentType(MediaType.APPLICATION_JSON).content("{}"),
@@ -261,6 +290,20 @@ class SubastaIntegrationTests {
 				.andExpect(jsonPath("$.data.puedePujar").value(false));
 		request(get("/api/subastas/6105/puja-actual"), "aprobado@quickbid.demo").andExpect(status().isOk())
 				.andExpect(jsonPath("$.data.puedePujar").value(false));
+	}
+
+	@Test void medioVerificadoSinLimiteNoCuentaComoLimiteInfinito() throws Exception {
+		jdbc.update("""
+				INSERT INTO app_medios_pago(id,cuenta_id,tipo,moneda,estado,principal,nacional,alias_visible,titular,
+					hash_identificador,limite_monto,consumo_actual,verificado_hasta)
+				VALUES (5096,3001,'tarjeta','ARS','verificado',false,true,'Sin limite','Ana','hash-no-limit',
+					NULL,0,DATEADD('DAY',7,CURRENT_TIMESTAMP))
+				""");
+		request(post("/api/subastas/6001/pujar").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"itemCatalogoId\":9001,\"monto\":25200,\"medioPagoId\":5096,"
+						+ "\"clientStateVersion\":1,\"idempotencyKey\":\"no-limit-test\"}"),
+				"aprobado@quickbid.demo").andExpect(status().isUnprocessableEntity())
+				.andExpect(jsonPath("$.errors[0].code").value("PAYMENT_METHOD_INSUFFICIENT_FUNDS"));
 	}
 
 	@Test void verificacionLiveNoExigeInscripcionPreviaParaPujar() throws Exception {

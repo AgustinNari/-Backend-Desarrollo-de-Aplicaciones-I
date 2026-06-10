@@ -97,6 +97,8 @@ Ejemplo base para subastas comun, especial o plata:
 - mínima normal 15.100;
 - máxima normal 17.000.
 
+- Un usuario puede pujar sin inscripción previa, siempre que cumpla las reglas de cuenta, categoría, medio de pago, moneda y estado de subasta, entre otros. Sin embargo, no puede pujar por un bien consignado por él mismo.
+
 ## Concurrencia de pujas
 
 - Al enviar una puja, bloquear/controlar transaccionalmente el estado del lote/subasta.
@@ -214,3 +216,23 @@ Generar notificaciones para:
 - acuerdo aceptado/rechazado;
 - devolución/liquidación;
 - documentos disponibles.
+
+---
+
+## Addendum post revisión de inconsistencias
+
+Este addendum prevalece sobre secciones anteriores si hubiera contradicción.
+
+- Access token: 15 minutos; refresh: 30 días; recovery: 30 minutos; setup: 48 horas; setup/recovery de un solo uso.
+- Etapa 3 usa `setup_token`; etapa 2 usa `fotoFrenteDni` y `fotoDorsoDni`; DNI no acepta PDF.
+- `bloqueada_permanente` permite login limitado solo para pantalla de bloqueo, sin navegación real.
+- Inscripción a subasta: hasta 60 minutos antes, acepta medio pendiente/verificado/vencido, no crea asistencia y si fue rechazada permite reintento con otro medio.
+- Medio verificado dura 5 días hábiles; validar/revalidar exige `limiteAprobado`; límite nulo no es infinito; medio vencido puede revalidarse.
+- Puntos finales: +30 medio verificado, +1 puja aceptada, +80 ganar puja, +60 compra a tiempo, +70 consignación puesta en subasta, +20 extras en plazo, -90 multa, -250 multa vencida.
+- Primera puja puede igualar precio base; oro/platino solo superan por 1 unidad; resto usa +1%/+20%.
+- `idempotencyKey` obligatorio; reservar límite mientras una puja es ganadora, liberar si es superada y consumir si gana final.
+- Cierre automático de lote: 60 s; delay próximo lote: 60 s; delay cierre final: 120 s.
+- Comisión comprador/vendedor sobre precio final ofertado. Si compra la empresa por falta de pujas, no hay comisión comprador.
+- Consignación: mínimo 6 fotos, máximo 15; `segmento` es rubro/tema y `categoriaSubasta` es común/especial/plata/oro/platino; `duenio` se requiere antes de proponer acuerdo, no al iniciar.
+- Direcciones: hasta 5 activas, una principal, baja lógica, evitar edición destructiva.
+- Notificaciones: modelo simple `leida/no_leida`, limpieza recomendada 30/90 días, documentos no se borran por borrar notificaciones.

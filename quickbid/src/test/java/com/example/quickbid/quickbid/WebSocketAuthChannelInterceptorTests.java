@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.messaging.Message;
@@ -38,6 +39,8 @@ class WebSocketAuthChannelInterceptorTests {
 	}
 
 	@Test void subscribeSinPrincipalSeRechaza() {
+		when(connections.accountId(null)).thenReturn(Optional.empty());
+
 		assertThrows(MessagingException.class, () -> interceptor.preSend(message(StompCommand.SUBSCRIBE), channel));
 	}
 
@@ -64,17 +67,44 @@ class WebSocketAuthChannelInterceptorTests {
 		when(accounts.findById(3001L)).thenReturn(Optional.of(account));
 		when(account.getEstado()).thenReturn("activa");
 		Message<?> message = message(StompCommand.CONNECT, "Bearer jwt-demo", "session-1", null, null);
+		AtomicReference<java.security.Principal> propagated = new AtomicReference<>();
+		StompHeaderAccessor.getAccessor(message, StompHeaderAccessor.class).setUserChangeCallback(propagated::set);
 
 		Message<?> authenticated = interceptor.preSend(message, channel);
 
 		assertEquals("3001", StompHeaderAccessor.wrap(authenticated).getUser().getName());
+		assertEquals("3001", propagated.get().getName());
 		verify(connections).connected("session-1", 3001L);
+	}
+
+	@Test void connectConCuentaRestringidaPuedeMirarLive() {
+		CuentaApp account = mock(CuentaApp.class);
+		when(tokens.accountId("jwt-restringido")).thenReturn(3002L);
+		when(accounts.findById(3002L)).thenReturn(Optional.of(account));
+		when(account.getEstado()).thenReturn("restriccion_multa");
+
+		Message<?> authenticated = interceptor.preSend(
+				message(StompCommand.CONNECT, "Bearer jwt-restringido", "session-2", null, null), channel);
+
+		assertEquals("3002", StompHeaderAccessor.wrap(authenticated).getUser().getName());
+		verify(connections).connected("session-2", 3002L);
 	}
 
 	@Test void subscribeConPrincipalDelegaAutorizacionFina() {
 		interceptor.preSend(message(StompCommand.SUBSCRIBE, null, "session-1",
 				"/topic/subastas/6001/estado", 3001L), channel);
 
+		verify(subscriptions).authorize(3001L, "/topic/subastas/6001/estado");
+	}
+
+	@Test void subscribeSinPrincipalUsaCuentaRegistradaParaLaSesion() {
+		when(connections.accountId("session-1")).thenReturn(Optional.of(3001L));
+		Message<?> subscription = message(StompCommand.SUBSCRIBE, null, "session-1",
+				"/topic/subastas/6001/estado", null);
+
+		Message<?> authorized = interceptor.preSend(subscription, channel);
+
+		assertEquals("3001", StompHeaderAccessor.wrap(authorized).getUser().getName());
 		verify(subscriptions).authorize(3001L, "/topic/subastas/6001/estado");
 	}
 
@@ -99,6 +129,7 @@ class WebSocketAuthChannelInterceptorTests {
 		if (sessionId != null) accessor.setSessionId(sessionId);
 		if (destination != null) accessor.setDestination(destination);
 		if (accountId != null) accessor.setUser(new UsernamePasswordAuthenticationToken(accountId, null));
+		accessor.setLeaveMutable(true);
 		return MessageBuilder.createMessage(new byte[0], accessor.getMessageHeaders());
 	}
 }

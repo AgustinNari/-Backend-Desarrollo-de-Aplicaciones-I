@@ -94,3 +94,36 @@
 - [ ] Logs útiles.
 - [ ] Tests unitarios de reglas críticas.
 - [ ] Tests de integración para flujos principales.
+
+---
+
+## Checklist post revisión de inconsistencias
+
+- [ ] Existe `docs/00_decisiones_finales.md`.
+- [ ] Existe `docs/API_CONTRATO_FINAL.md`.
+- [ ] Existe `docs/10_plan_correcciones_backend.md`.
+- [ ] `AGENTS.md` prioriza decisiones finales sobre source material.
+- [ ] Access token 15 min.
+- [ ] Refresh token 30 días.
+- [ ] Login limitado para `bloqueada_permanente`.
+- [ ] Etapa 3 usa `setup_token`.
+- [ ] Etapa 2 usa `fotoFrenteDni` y `fotoDorsoDni`.
+- [ ] Inscripción cierra a 60 min.
+- [ ] Inscripción rechazada permite reintento con otro medio.
+- [ ] Medio validado exige `limiteAprobado`.
+- [ ] Medio vencido puede revalidarse.
+- [ ] Puntos coinciden con `00_decisiones_finales.md`.
+- [ ] Cierre automático de lote 60 s.
+- [ ] Delay siguiente lote 60 s.
+- [ ] Delay cierre subasta 120 s.
+- [ ] Reserva/liberación/consumo de límite por puja ganadora activa.
+- [ ] Comisión comprador/vendedor sobre precio final.
+- [ ] Empresa compra al precio base sin comisión comprador.
+- [ ] Consignación mínimo 6 y máximo 15 fotos.
+- [x] V12 corrige el backfill historico de comision vendedor para consignaciones sin alterar comision comprador ni compras legacy; cubierta por tests y pendiente de validacion Flyway real sobre PostgreSQL vacio.
+- [ ] `segmento` separado de `categoriaSubasta`.
+- [ ] Direcciones de envío hasta 5 activas.
+- [x] Notificaciones leidas/no leidas con limpieza 30/90 dias o endpoint/job equivalente.
+- [x] `GET /api/usuario/estadisticas` aplica `periodo=mes|trimestre|anual|total`.
+- [x] Historial paginado incluye pujas ganadas, perdidas/superadas y compras.
+- [x] Endpoints admin auxiliares procesan medios vencidos, multas vencidas, compras abandonadas, devoluciones vencidas y limpieza de notificaciones.

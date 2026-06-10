@@ -3,6 +3,7 @@ package com.example.quickbid.quickbid.service;
 import java.math.BigDecimal;
 import java.sql.PreparedStatement;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Set;
 
@@ -31,6 +32,7 @@ import com.example.quickbid.quickbid.dto.response.ConsignmentDtos.Liquidation;
 import com.example.quickbid.quickbid.dto.response.MedioPagoResponse;
 import com.example.quickbid.quickbid.dto.response.PurchaseDtos.Detail;
 import com.example.quickbid.quickbid.dto.response.PurchaseDtos.Payment;
+import com.example.quickbid.quickbid.dto.response.SubastaDtos.AuctionLifecycleEvent;
 import com.example.quickbid.quickbid.entity.app.CuentaApp;
 import com.example.quickbid.quickbid.exception.BusinessException;
 import com.example.quickbid.quickbid.repository.app.AdminQueryRepository;
@@ -39,11 +41,12 @@ import com.example.quickbid.quickbid.repository.app.CuentaAppRepository;
 import com.example.quickbid.quickbid.repository.app.SolicitudRegistroRepository;
 import com.example.quickbid.quickbid.repository.legacy.ClienteRepository;
 import com.example.quickbid.quickbid.service.PurchaseService.PaymentOutcome;
+import com.example.quickbid.quickbid.websocket.PurchaseRealtimePublisher;
 
 @Service
 public class AdminService {
 	private static final Set<String> CATEGORIES = Set.of("comun", "especial", "plata", "oro", "platino");
-	private static final Set<String> PAYMENT_METHOD_STATES = Set.of("pendiente_verificacion", "verificado", "rechazado", "eliminado");
+	private static final Set<String> PAYMENT_METHOD_STATES = Set.of("pendiente_verificacion", "verificado", "rechazado", "vencido", "eliminado");
 	private final JdbcTemplate jdbc;
 	private final SolicitudRegistroRepository registrations;
 	private final RegistrationApprovalService registrationApproval;
@@ -52,18 +55,21 @@ public class AdminService {
 	private final CategoriaService categories;
 	private final MedioPagoService paymentMethods;
 	private final PurchaseService purchases;
+	private final AuctionTimerService auctionTimers;
 	private final ConsignmentService consignments;
 	private final AuditService audit;
 	private final Environment environment;
 	private final MailNotificationService mail;
 	private final AdminQueryRepository queries;
 	private final AuctionQueryRepository auctionQueries;
+	private final PurchaseRealtimePublisher realtime;
 
 	public AdminService(JdbcTemplate jdbc, SolicitudRegistroRepository registrations,
 			RegistrationApprovalService registrationApproval, CuentaAppRepository accounts, ClienteRepository clients,
 			CategoriaService categories, MedioPagoService paymentMethods, PurchaseService purchases,
-			ConsignmentService consignments, AuditService audit, Environment environment, MailNotificationService mail,
-			AdminQueryRepository queries, AuctionQueryRepository auctionQueries) {
+			AuctionTimerService auctionTimers, ConsignmentService consignments, AuditService audit,
+			Environment environment, MailNotificationService mail, AdminQueryRepository queries,
+			AuctionQueryRepository auctionQueries, PurchaseRealtimePublisher realtime) {
 		this.jdbc = jdbc;
 		this.registrations = registrations;
 		this.registrationApproval = registrationApproval;
@@ -72,12 +78,14 @@ public class AdminService {
 		this.categories = categories;
 		this.paymentMethods = paymentMethods;
 		this.purchases = purchases;
+		this.auctionTimers = auctionTimers;
 		this.consignments = consignments;
 		this.audit = audit;
 		this.environment = environment;
 		this.mail = mail;
 		this.queries = queries;
 		this.auctionQueries = auctionQueries;
+		this.realtime = realtime;
 	}
 
 	@Transactional(readOnly = true)
@@ -146,12 +154,62 @@ public class AdminService {
 		return queries.findPaymentMethods(normalizedState);
 	}
 
-	public MedioPagoResponse verifyPaymentMethod(Long id, Integer employeeId) {
-		return paymentMethods.verify(id, employeeId);
+	public MedioPagoResponse verifyPaymentMethod(Long id, BigDecimal approvedLimit, Integer employeeId) {
+		return paymentMethods.verify(id, employeeId, approvedLimit);
 	}
 
 	public MedioPagoResponse rejectPaymentMethod(Long id, String reason, Integer employeeId) {
 		return paymentMethods.reject(id, employeeId, reason);
+	}
+
+	public Status expirePaymentMethods(Integer employeeId) {
+		int expired = paymentMethods.expireVerified();
+		audit(employeeId, "medio_pago.verificaciones_vencidas", "medio_pago", null);
+		return new Status("procesado", expired + " medios vencidos");
+	}
+
+	public Status processDueJobs(Integer employeeId) {
+		int expiredPaymentMethods = paymentMethods.expireVerified();
+		int fines = purchases.expireDueFines();
+		int purchases = this.purchases.abandonDueExtraPayments();
+		int returns = consignments.expireDueReturns(employeeId);
+		int notifications = cleanupOldNotifications();
+		audit(employeeId, "vencimientos.procesados", "sistema", null);
+		return new Status("procesado", "Medios vencidos: " + expiredPaymentMethods + ", multas vencidas: " + fines
+				+ ", compras abandonadas: " + purchases + ", devoluciones vencidas: " + returns
+				+ ", notificaciones eliminadas: " + notifications);
+	}
+
+	public Status expireDueFines(Integer employeeId) {
+		int expired = purchases.expireDueFines();
+		audit(employeeId, "multas.vencidas_procesadas", "multa", null);
+		return new Status("procesado", expired + " multas vencidas");
+	}
+
+	public Status abandonDuePurchases(Integer employeeId) {
+		int abandoned = purchases.abandonDueExtraPayments();
+		audit(employeeId, "compras.vencidas_procesadas", "compra", null);
+		return new Status("procesado", abandoned + " compras abandonadas");
+	}
+
+	public Status expireDueConsignmentReturns(Integer employeeId) {
+		int expired = consignments.expireDueReturns(employeeId);
+		audit(employeeId, "consignaciones.devoluciones_vencidas_procesadas", "consignacion", null);
+		return new Status("procesado", expired + " devoluciones vencidas");
+	}
+
+	public Status cleanupNotifications(Integer employeeId) {
+		int deleted = cleanupOldNotifications();
+		audit(employeeId, "notificaciones.limpieza_antiguas", "notificacion", null);
+		return new Status("procesado", deleted + " notificaciones eliminadas");
+	}
+
+	private int cleanupOldNotifications() {
+		return jdbc.update("""
+				DELETE FROM app_notificaciones
+				WHERE (leida = true AND COALESCE(read_at, created_at) < ?)
+				   OR (leida = false AND created_at < ?)
+				""", OffsetDateTime.now().minusDays(30), OffsetDateTime.now().minusDays(90));
 	}
 
 	@Transactional
@@ -197,6 +255,7 @@ public class AdminService {
 		jdbc.update("UPDATE subastas SET estado='abierta' WHERE identificador=?", id);
 		jdbc.update("UPDATE app_subasta_ext SET estado_operativo='en_vivo',updated_at=CURRENT_TIMESTAMP WHERE subasta_id=?", id);
 		if (becameLive) {
+			Long version = startLiveLifecycle(id);
 			auctionQueries.findNotificationRecipientsForAuctionStart(id).forEach(accountId -> {
 				jdbc.update("""
 						INSERT INTO app_notificaciones(cuenta_id,tipo,titulo,descripcion,referencia_tipo,referencia_id)
@@ -205,9 +264,33 @@ public class AdminService {
 						""", accountId, id);
 				mail.critical(accountId, "subasta_inscripta_proxima_inicio");
 			});
+			realtime.afterCommit(new AuctionLifecycleEvent("SUBASTA_INICIADA", id, null, version));
 		}
 		audit(employeeId, "subasta.abierta", "subasta", id.longValue());
 		return auction(id);
+	}
+
+	/**
+	 * Deja el estado vivo listo para que el scheduler active el primer lote sin
+	 * intervencion manual: sin lote activo y con el proximo lote programado de inmediato.
+	 * Devuelve la version resultante para publicarla en el evento de inicio.
+	 */
+	private Long startLiveLifecycle(Integer auctionId) {
+		int updated = jdbc.update("""
+				UPDATE app_subasta_estado_vivo
+				SET item_catalogo_activo_id=NULL,version=version+1,retencion_hasta=NULL,
+					lote_finaliza_estimado_at=NULL,proximo_lote_programado_at=CURRENT_TIMESTAMP,
+					subasta_finaliza_programado_at=NULL,updated_at=CURRENT_TIMESTAMP
+				WHERE subasta_id=?
+				""", auctionId);
+		if (updated == 0) {
+			jdbc.update("""
+					INSERT INTO app_subasta_estado_vivo(subasta_id,version,usuarios_conectados,proximo_lote_programado_at)
+					VALUES (?,1,0,CURRENT_TIMESTAMP)
+					""", auctionId);
+		}
+		return jdbc.queryForObject("SELECT version FROM app_subasta_estado_vivo WHERE subasta_id=?", Long.class,
+				auctionId);
 	}
 
 	public Status closeAuction(Integer id, Integer employeeId) {
@@ -220,10 +303,18 @@ public class AdminService {
 	public Status setActiveItem(Integer id, Integer itemId, Integer employeeId) {
 		requireAuction(id);
 		if (!auctionQueries.existsAuctionItem(id, itemId)) throw bad("El item no pertenece a la subasta", "INVALID_AUCTION_ITEM");
+		OffsetDateTime lotDeadline = OffsetDateTime.now().plusSeconds(60);
 		jdbc.update("""
 				UPDATE app_subasta_estado_vivo SET item_catalogo_activo_id=?,version=version+1,
-					lote_iniciado_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE subasta_id=?
-				""", itemId, id);
+					lote_iniciado_at=CURRENT_TIMESTAMP,retencion_hasta=NULL,lote_finaliza_estimado_at=?,
+					proximo_lote_programado_at=NULL,subasta_finaliza_programado_at=NULL,updated_at=CURRENT_TIMESTAMP
+				WHERE subasta_id=?
+				""", itemId, lotDeadline, id);
+		// La activacion manual debe publicar el mismo evento que la activacion automatica
+		// del scheduler; de lo contrario los clientes conectados quedan desincronizados.
+		Long version = jdbc.queryForObject("SELECT version FROM app_subasta_estado_vivo WHERE subasta_id=?",
+				Long.class, id);
+		realtime.afterCommit(new AuctionLifecycleEvent("LOTE_ACTIVADO", id, itemId, version, lotDeadline));
 		audit(employeeId, "subasta.item_activo_actualizado", "subasta", id.longValue());
 		return new Status("item_activo", "Item activo " + itemId);
 	}
@@ -232,6 +323,14 @@ public class AdminService {
 		Detail detail = purchases.closeLot(id, outcome);
 		audit(employeeId, "subasta.lote_cerrado_admin", "compra", detail.id());
 		return detail;
+	}
+
+	public Status processAuctionTimers(Integer employeeId) {
+		var result = auctionTimers.processDueTimers();
+		audit(employeeId, "subasta.timers_procesados", "subasta", null);
+		return new Status("procesado", "Lotes cerrados: " + result.lotesCerrados()
+				+ ", lotes activados: " + result.lotesActivados()
+				+ ", subastas finalizadas: " + result.subastasFinalizadas());
 	}
 
 	@Transactional
@@ -268,6 +367,12 @@ public class AdminService {
 		return payment;
 	}
 
+	public Status abandonPurchase(Long id, boolean pickupFailure, Integer employeeId) {
+		purchases.abandon(id, pickupFailure);
+		audit(employeeId, "compra.abandonada_admin", "compra", id);
+		return new Status("abandonada", "Compra marcada como abandonada");
+	}
+
 	public Status expireFine(Long id, Integer employeeId) {
 		purchases.expireFine(id, true);
 		audit(employeeId, "multa.vencida_admin", "multa", id);
@@ -285,18 +390,65 @@ public class AdminService {
 		return queries.findConsignments();
 	}
 
-	public void requestDocuments(Long id, Integer employeeId) { consignments.requestOriginDocuments(id, employeeId); }
-	public void rejectConsignment(Long id, String reason, Integer employeeId) { consignments.rejectDigitalReview(id, employeeId, reason); }
-	public void approveDigitalReview(Long id, Integer employeeId) { consignments.approveDigitalReview(id, employeeId); }
-	public void reviewDocuments(Long id, boolean approved, String reason, Integer employeeId) { consignments.reviewOriginDocuments(id, employeeId, approved, reason); }
-	public void markPhysicalReception(Long id, Integer employeeId) { consignments.markPhysicalReception(id, employeeId); }
-	public void approvePhysicalReview(Long id, Integer employeeId) { consignments.approvePhysicalReview(id, employeeId); }
-	public void rejectPhysicalReview(Long id, String reason, Integer employeeId) { consignments.rejectPhysicalReview(id, employeeId, reason); }
-	public Integer verifyOwner(Long accountId, boolean financial, boolean judicial, int risk, Integer employeeId) { return consignments.verifyConsignor(accountId, employeeId, financial, judicial, risk); }
-	public void proposeAgreement(Long id, Agreement request, Integer employeeId) { consignments.proposeAgreement(id, employeeId, request.valorBase(), request.moneda(), request.comisionCompradorPct(), request.comisionVendedorPct(), request.condiciones()); }
-	public Integer assignAuction(Long id, AssignAuction request, Integer employeeId) { return consignments.assignAuctionAndInsurance(id, employeeId, request.subastaId(), request.catalogoId(), request.polizaCombinada()); }
-	public Liquidation liquidate(Long id, Long paymentMethodId, Integer employeeId) { return consignments.liquidate(id, employeeId, paymentMethodId); }
-	public void markReturnIncomplete(Long id, Integer employeeId) { consignments.markReturnIncomplete(id, employeeId); }
+	public void requestDocuments(Long id, Integer employeeId) {
+		consignments.requestOriginDocuments(id, employeeId);
+	}
+
+	public void rejectConsignment(Long id, String reason, Integer employeeId) {
+		consignments.rejectDigitalReview(id, employeeId, reason);
+	}
+
+	public void approveDigitalReview(Long id, Integer employeeId) {
+		consignments.approveDigitalReview(id, employeeId);
+	}
+
+	public void reviewDocuments(Long id, boolean approved, String reason, Integer employeeId) {
+		consignments.reviewOriginDocuments(id, employeeId, approved, reason);
+	}
+
+	public void markPhysicalReception(Long id, Integer employeeId) {
+		consignments.markPhysicalReception(id, employeeId);
+	}
+
+	public void approvePhysicalReview(Long id, Integer employeeId) {
+		consignments.approvePhysicalReview(id, employeeId);
+	}
+
+	public void rejectPhysicalReview(Long id, String reason, Integer employeeId) {
+		consignments.rejectPhysicalReview(id, employeeId, reason);
+	}
+
+	public Integer verifyOwner(Long accountId, boolean financial, boolean judicial, int risk, Integer employeeId) {
+		return consignments.verifyConsignor(accountId, employeeId, financial, judicial, risk);
+	}
+
+	public void proposeAgreement(Long id, Agreement request, Integer employeeId) {
+		consignments.proposeAgreement(
+				id,
+				employeeId,
+				request.valorBase(),
+				request.moneda(),
+				request.comisionCompradorPct(),
+				request.comisionVendedorPct(),
+				request.condiciones());
+	}
+
+	public Integer assignAuction(Long id, AssignAuction request, Integer employeeId) {
+		return consignments.assignAuctionAndInsurance(
+				id,
+				employeeId,
+				request.subastaId(),
+				request.catalogoId(),
+				request.polizaCombinada());
+	}
+
+	public Liquidation liquidate(Long id, Long paymentMethodId, Integer employeeId) {
+		return consignments.liquidate(id, employeeId, paymentMethodId);
+	}
+
+	public void markReturnIncomplete(Long id, Integer employeeId) {
+		consignments.markReturnIncomplete(id, employeeId);
+	}
 
 	public Status seed(String scope, Integer employeeId) {
 		requireDevOrTest();
@@ -332,10 +484,34 @@ public class AdminService {
 		return value == null || value.isBlank() ? null : value.trim().toLowerCase();
 	}
 
-	private CuentaApp account(Long id) { return accounts.findById(id).orElseThrow(() -> notFound("Cuenta inexistente")); }
-	private AdminDtos.Registration registration(com.example.quickbid.quickbid.entity.app.SolicitudRegistro value) { return new AdminDtos.Registration(value.getId(), value.getEmail(), value.getNombre(), value.getApellido(), value.getEstado(), value.getMotivoRechazo(), value.getPersonaId(), value.getClienteId()); }
-	private Account account(CuentaApp value) { return new Account(value.getId(), value.getEmail(), value.getEstado(), value.getPuntos(), value.getCategoriaCalculada()); }
-	private void audit(Integer employeeId, String action, String entity, Long id) { audit.record(new AuditEvent("admin", employeeId.longValue(), action, entity, id, "{}")); }
+	private CuentaApp account(Long id) {
+		return accounts.findById(id).orElseThrow(() -> notFound("Cuenta inexistente"));
+	}
+
+	private AdminDtos.Registration registration(com.example.quickbid.quickbid.entity.app.SolicitudRegistro value) {
+		return new AdminDtos.Registration(
+				value.getId(),
+				value.getEmail(),
+				value.getNombre(),
+				value.getApellido(),
+				value.getEstado(),
+				value.getMotivoRechazo(),
+				value.getPersonaId(),
+				value.getClienteId());
+	}
+
+	private Account account(CuentaApp value) {
+		return new Account(
+				value.getId(),
+				value.getEmail(),
+				value.getEstado(),
+				value.getPuntos(),
+				value.getCategoriaCalculada());
+	}
+
+	private void audit(Integer employeeId, String action, String entity, Long id) {
+		audit.record(new AuditEvent("admin", employeeId.longValue(), action, entity, id, "{}"));
+	}
 
 	private long insert(String sql, String column, SqlBinder binder) {
 		GeneratedKeyHolder keys = new GeneratedKeyHolder();

@@ -61,3 +61,17 @@ Base sugerida: `/api/admin`.
 - Toda acción admin debe quedar en `app_auditoria`.
 - Los endpoints admin pueden ser más prácticos que perfectos, pero no deben violar invariantes de negocio.
 - Aunque no exista UI admin, deben permitir probar el flujo completo sin editar SQL manualmente para cada paso.
+
+---
+
+## Addendum post revisión admin
+
+Agregar o verificar soporte admin para:
+
+- revalidar medio vencido;
+- revalidar medio verificado reiniciando 5 días hábiles;
+- validar/revalidar medio con `limiteAprobado` obligatorio;
+- ajustar puntos y recalcular categoría;
+- procesar vencimientos: medios expirados, multas vencidas, compras abandonadas, devoluciones vencidas, limpieza de notificaciones;
+- reenviar/regenerar documentos si se implementa;
+- verificar `duenio` antes de proponer acuerdo de consignación.

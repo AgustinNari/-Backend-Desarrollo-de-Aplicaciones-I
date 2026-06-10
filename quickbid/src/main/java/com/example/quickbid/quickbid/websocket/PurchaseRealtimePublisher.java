@@ -6,6 +6,7 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.example.quickbid.quickbid.dto.response.PurchaseDtos.LotClosedEvent;
+import com.example.quickbid.quickbid.dto.response.SubastaDtos.AuctionLifecycleEvent;
 
 @Service
 public class PurchaseRealtimePublisher {
@@ -32,7 +33,24 @@ public class PurchaseRealtimePublisher {
 	public void publish(LotClosedEvent event, Long buyerAccountId) {
 		messages.convertAndSend("/topic/subastas/" + event.subastaId() + "/estado", event);
 		if (buyerAccountId != null) {
-			messages.convertAndSendToUser(buyerAccountId.toString(), "/queue/notificaciones", event);
+			messages.convertAndSendToUser(buyerAccountId.toString(), "/queue/notificaciones",
+					new LotClosedEvent("LOTE_GANADO", event.subastaId(), event.itemCatalogoId(), event.compraId(),
+							event.pujaGanadoraId(), event.montoAdjudicacion(), event.moneda(), event.compradorEmpresa(),
+							event.versionEstado(), event.proximoLoteProgramadoAt(), event.subastaFinalizaProgramadoAt()));
+		}
+	}
+
+	public void afterCommit(AuctionLifecycleEvent event) {
+		Runnable publish = () -> messages.convertAndSend("/topic/subastas/" + event.subastaId() + "/estado", event);
+		if (TransactionSynchronizationManager.isSynchronizationActive()) {
+			TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+				@Override
+				public void afterCommit() {
+					publish.run();
+				}
+			});
+		} else {
+			publish.run();
 		}
 	}
 }

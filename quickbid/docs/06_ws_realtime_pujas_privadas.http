@@ -1,0 +1,182 @@
+# -----------------------------------------------------------------------------
+# QuickBid - WebSocket realtime manual test helper
+# -----------------------------------------------------------------------------
+# Uso recomendado sobre BASE LIMPIA, con backend levantado.
+#
+# Objetivo:
+# - Probar eventos publicos: /topic/subastas/6001/estado
+# - Probar eventos publicos: /topic/subastas/6001/items/9001/pujas
+# - Probar eventos privados: /user/queue/notificaciones
+# - Probar eventos privados: /user/queue/pujas
+#
+# Antes de ejecutar las pujas:
+# 1) Ejecutar login 3001 y copiar accessToken.
+# 2) Abrir http://localhost:8080/ws-test.html.
+# 3) Pegar token de 3001, Conectar y Suscribirse.
+# 4) Opcional: abrir otro navegador/incognito con token de 3004, Conectar y Suscribirse.
+# 5) Ejecutar las requests de este archivo en orden.
+#
+# Resultado esperado principal:
+# - Step 06: 3004 supera puja seed de 3001.
+#   HTML 3001 debe recibir:
+#     * /topic/subastas/6001/items/9001/pujas -> MEJOR_OFERTA_ACTUALIZADA
+#     * /topic/subastas/6001/estado -> ESTADO_ACTUALIZADO
+#     * /user/queue/pujas -> PUJA_SUPERADA
+#   HTML 3004, si esta abierto, debe recibir:
+#     * /user/queue/notificaciones -> PUJA_ACEPTADA
+#
+# - Step 08: 3001 supera a 3004.
+#   HTML 3001 debe recibir publicos + /user/queue/notificaciones -> PUJA_ACEPTADA.
+#   HTML 3004, si esta abierto, debe recibir /user/queue/pujas -> PUJA_SUPERADA.
+#
+# - Step 09: puja rechazada por version vieja.
+#   HTML 3001 debe recibir /user/queue/pujas -> PUJA_RECHAZADA.
+#
+# - Step 11: cierre de lote.
+#   HTML ganador debe recibir /user/queue/notificaciones y todos reciben /topic/subastas/6001/estado -> LOTE_CERRADO.
+# -----------------------------------------------------------------------------
+
+@baseUrl = http://localhost:8080
+@adminKey = test-admin-key
+
+@subastaEnVivoId = 6001
+@itemActivoId = 9001
+@medioPagoAprobadoArsId = 5001
+@medioPagoConsignadorArsId = 5005
+
+@accessAprobado = {{loginAprobado.response.body.$.data.accessToken}}
+@accessConsignador = {{loginConsignador.response.body.$.data.accessToken}}
+@accessMulta = {{loginMulta.response.body.$.data.accessToken}}
+
+### 00 - Health
+GET {{baseUrl}}/actuator/health
+
+### 01 - Login usuario 3001 aprobado
+# @name loginAprobado
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "aprobado@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+### 02 - Login usuario 3004 consignador / oro
+# @name loginConsignador
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "consignador@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+### 03 - Login usuario 3002 con multa / restriccion
+# @name loginMulta
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "multa@quickbid.demo",
+  "clave": "Demo123!"
+}
+
+### 04 - Verificacion acceso 3001
+POST {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/verificacion
+Authorization: Bearer {{accessAprobado}}
+
+### 05 - Estado inicial de puja actual
+# En base limpia deberia tener mejorOfertaActual 25100 y versionEstado 1.
+# @name pujaActualInicial
+GET {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/puja-actual
+Authorization: Bearer {{accessAprobado}}
+
+### 06 - 3004 supera la puja seed de 3001
+# Esperado WS:
+# - Publico item: MEJOR_OFERTA_ACTUALIZADA, monto 25300, versionEstado 2
+# - Publico estado: ESTADO_ACTUALIZADO, mejorOfertaActual 25300
+# - Privado 3001 /user/queue/pujas: PUJA_SUPERADA
+# - Privado 3004 /user/queue/notificaciones: PUJA_ACEPTADA, si hay HTML 3004 abierto
+# @name puja3004Supera3001
+POST {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/pujar
+Authorization: Bearer {{accessConsignador}}
+Content-Type: application/json
+
+{
+  "itemCatalogoId": {{itemActivoId}},
+  "monto": 25300,
+  "medioPagoId": {{medioPagoConsignadorArsId}},
+  "clientStateVersion": 1,
+  "idempotencyKey": "ws-3004-supera-3001-{{$timestamp}}"
+}
+
+### 07 - Estado despues de puja 3004
+# @name pujaActualDespues3004
+GET {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/puja-actual
+Authorization: Bearer {{accessAprobado}}
+
+### 08 - 3001 supera a 3004
+# Para subasta plata, monto 25600 deberia superar 25300 con incremento minimo.
+# Esperado WS:
+# - Publico item: MEJOR_OFERTA_ACTUALIZADA, monto 25600, versionEstado 3
+# - Publico estado: ESTADO_ACTUALIZADO, mejorOfertaActual 25600
+# - Privado 3001 /user/queue/notificaciones: PUJA_ACEPTADA
+# - Privado 3004 /user/queue/pujas: PUJA_SUPERADA, si hay HTML 3004 abierto
+# @name puja3001Supera3004
+POST {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/pujar
+Authorization: Bearer {{accessAprobado}}
+Content-Type: application/json
+
+{
+  "itemCatalogoId": {{itemActivoId}},
+  "monto": 25600,
+  "medioPagoId": {{medioPagoAprobadoArsId}},
+  "clientStateVersion": 2,
+  "idempotencyKey": "ws-3001-supera-3004-{{$timestamp}}"
+}
+
+### 09 - 3001 intenta puja con version vieja: debe fallar y publicar PUJA_RECHAZADA privada
+# Esperado HTTP: 409 BID_OUTDATED_STATE
+# Esperado WS 3001 /user/queue/pujas: PUJA_RECHAZADA
+POST {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/pujar
+Authorization: Bearer {{accessAprobado}}
+Content-Type: application/json
+
+{
+  "itemCatalogoId": {{itemActivoId}},
+  "monto": 26000,
+  "medioPagoId": {{medioPagoAprobadoArsId}},
+  "clientStateVersion": 1,
+  "idempotencyKey": "ws-3001-rechazada-version-{{$timestamp}}"
+}
+
+### 10 - Usuario con multa intenta pujar: debe fallar y publicar PUJA_RECHAZADA privada si esta conectado
+# Esperado HTTP: 403 ACCOUNT_RESTRICTED_BY_FINE
+POST {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/pujar
+Authorization: Bearer {{accessMulta}}
+Content-Type: application/json
+
+{
+  "itemCatalogoId": {{itemActivoId}},
+  "monto": 27000,
+  "medioPagoId": 5004,
+  "clientStateVersion": 3,
+  "idempotencyKey": "ws-3002-rechazada-multa-{{$timestamp}}"
+}
+
+### 11 - Admin cierra lote con cobro exitoso
+# Esperado WS:
+# - Publico /topic/subastas/6001/estado: LOTE_CERRADO
+# - Privado ganador /user/queue/notificaciones: LOTE_CERRADO
+# No repetir sin resetear BD.
+# @name cerrarLote6001
+POST {{baseUrl}}/api/admin/subastas/{{subastaEnVivoId}}/cerrar-lote?resultado=SUCCESS
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### 12 - Estado luego del cierre
+GET {{baseUrl}}/api/subastas/{{subastaEnVivoId}}/puja-actual
+Authorization: Bearer {{accessAprobado}}
+
+### 13 - Compras del ganador 3001
+GET {{baseUrl}}/api/compras?page=0&size=20
+Authorization: Bearer {{accessAprobado}}

@@ -2,23 +2,37 @@ package com.example.quickbid.quickbid;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.messaging.MessagingException;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.jdbc.Sql;
+import org.springframework.test.web.servlet.MockMvc;
 
 import com.example.quickbid.quickbid.websocket.WebSocketSubscriptionAuthorizer;
 
 @SpringBootTest
+@AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Sql(scripts = "/auth-test-data.sql", executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
 class WebSocketSubscriptionAuthorizerIntegrationTests {
 	@Autowired WebSocketSubscriptionAuthorizer subscriptions;
 	@Autowired JdbcTemplate jdbc;
+	@Autowired MockMvc mvc;
+
+	@Test void handshakeSinJwtHttpLlegaAlTransporteWebSocket() throws Exception {
+		mvc.perform(get("/ws")).andExpect(status().isBadRequest());
+	}
+
+	@Test void paginaLocalDePruebaWebSocketCargaSinJwt() throws Exception {
+		mvc.perform(get("/ws-test.html")).andExpect(status().isOk());
+	}
 
 	@Test void usuarioActivoPuedeSuscribirseATopicsLiveYColasPrivadasPropias() {
 		assertDoesNotThrow(() -> subscriptions.authorize(3001L, "/topic/subastas/6001/estado"));

@@ -18,19 +18,24 @@ public final class ConsignmentDtos {
 			String accionPendiente, Long fotoPrincipalArchivoId, OffsetDateTime updatedAt) {
 	}
 
-	public record Detail(Long id, String titulo, String descripcion, String categoriaSugerida, String historia,
-			String artistaDisenador, String fechaObjeto, String estado, Boolean requiereDocumentacionOrigen,
-			String motivoRechazo, Integer productoId, Integer itemCatalogoId, Integer subastaId,
-			BigDecimal valorBase, String moneda, BigDecimal comisionCompradorPct, BigDecimal comisionVendedorPct,
-			BigDecimal netoEstimado, String acuerdoTexto, String ubicacionFisica, Policy poliza,
-			List<File> fotos, List<File> documentosOrigen, Return devolucion, Liquidation liquidacion,
+	public record Detail(Long id, String titulo, String descripcion, String segmento, String categoriaSubasta,
+			String categoriaSugerida, String historia, String artistaDisenador, String fechaObjeto, String estado,
+			Boolean requiereDocumentacionOrigen, String motivoRechazo, Integer productoId, Integer itemCatalogoId,
+			Integer subastaId, BigDecimal valorBase, String moneda, BigDecimal comisionCompradorPct,
+			BigDecimal comisionVendedorPct, BigDecimal netoEstimado, String acuerdoTexto, String ubicacionFisica,
+			Policy poliza, List<File> fotos, List<File> documentosOrigen, Return devolucion, Liquidation liquidacion,
 			OffsetDateTime createdAt, OffsetDateTime updatedAt) {
 	}
 
 	public record File(Long archivoId, String filename, String contentType, Long sizeBytes, String estado) {
 	}
 
-	public record Return(Long id, String modalidad, BigDecimal costo, String moneda, String estado, Long pagoId) {
+	public record Return(Long id, String modalidad, BigDecimal costo, String moneda, String estado, Long pagoId,
+			Long direccionEnvioId, String direccionResumen) {
+	}
+
+	public record ReturnPreview(String modalidad, Long direccionEnvioId, BigDecimal costo, String moneda,
+			BigDecimal totalEstimado, String direccionResumen) {
 	}
 
 	public record ReturnPayment(Long id, Long devolucionId, Long medioPagoId, BigDecimal monto, String moneda,

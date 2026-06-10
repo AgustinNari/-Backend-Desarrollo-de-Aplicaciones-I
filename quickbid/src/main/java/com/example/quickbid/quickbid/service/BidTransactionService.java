@@ -5,7 +5,6 @@ import java.sql.PreparedStatement;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -16,8 +15,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.example.quickbid.quickbid.dto.request.BidRequest;
 import com.example.quickbid.quickbid.dto.response.SubastaDtos.Bid;
+import com.example.quickbid.quickbid.entity.app.CuentaApp;
 import com.example.quickbid.quickbid.exception.BusinessException;
 import com.example.quickbid.quickbid.repository.app.AuctionQueryRepository;
+import com.example.quickbid.quickbid.repository.app.CuentaAppRepository;
 
 @Service
 public class BidTransactionService {
@@ -25,13 +26,19 @@ public class BidTransactionService {
 	private static final BigDecimal ONE_PERCENT = new BigDecimal("0.01");
 	private static final BigDecimal TWENTY_PERCENT = new BigDecimal("0.20");
 	private static final BigDecimal ONE_UNIT = BigDecimal.ONE;
+	private static final int LOT_IDLE_SECONDS = 60;
 
 	private final JdbcTemplate jdbc;
 	private final AuctionQueryRepository auctionQueries;
+	private final CuentaAppRepository accounts;
+	private final CategoriaService categories;
 
-	public BidTransactionService(JdbcTemplate jdbc, AuctionQueryRepository auctionQueries) {
+	public BidTransactionService(JdbcTemplate jdbc, AuctionQueryRepository auctionQueries,
+			CuentaAppRepository accounts, CategoriaService categories) {
 		this.jdbc = jdbc;
 		this.auctionQueries = auctionQueries;
+		this.accounts = accounts;
+		this.categories = categories;
 	}
 
 	@Transactional
@@ -57,11 +64,12 @@ public class BidTransactionService {
 		if (categoryOrder(account.category()) == 0 || categoryOrder(auction.category()) == 0) throw unprocessable("Categoria invalida", "INVALID_CATEGORY");
 		if (categoryOrder(account.category()) < categoryOrder(auction.category())) throw forbidden("Categoria insuficiente", "AUCTION_CATEGORY_FORBIDDEN");
 
-		Payment payment = payment(accountId, request.medioPagoId());
-		validatePayment(payment, auction.currency(), request.monto());
-		if (participatesInOtherAuction(accountId, auctionId)) throw conflict("El usuario participa en otra subasta", "OTHER_AUCTION_PARTICIPATION");
-
 		PriorBid prior = bestBid(auctionId, request.itemCatalogoId());
+		Payment payment = payment(accountId, request.medioPagoId());
+		Long reservationToReplace = prior != null && prior.accountId().equals(accountId)
+				&& prior.paymentId().equals(request.medioPagoId()) ? prior.id() : null;
+		validatePayment(payment, auction.currency(), request.monto(), reservationToReplace);
+		if (participatesInOtherAuction(accountId, auctionId)) throw conflict("El usuario participa en otra subasta", "OTHER_AUCTION_PARTICIPATION");
 		validateAmount(auction.category(), request.monto(), item.basePrice(), prior == null ? null : prior.amount());
 
 		int assistantId = assistant(account.clientId(), auctionId);
@@ -69,13 +77,20 @@ public class BidTransactionService {
 		int legacyBidId = insertLegacyBid(assistantId, request.itemCatalogoId(), request.monto());
 		long sequence = nextSequence(auctionId, request.itemCatalogoId());
 		long nextVersion = live.version() + 1;
+		OffsetDateTime retentionUntil = OffsetDateTime.now().plusSeconds(LOT_IDLE_SECONDS);
 		if (prior != null) {
 			jdbc.update("UPDATE app_pujas_live SET estado='superada' WHERE id=? AND estado='aceptada'", prior.id());
+			releaseReservation(prior.id());
 		}
 		long id = insertBid(legacyBidId, auctionId, request, accountId, auction.currency(), sequence, nextVersion,
 				idempotencyKey);
-		jdbc.update("UPDATE app_subasta_estado_vivo SET version=?,updated_at=CURRENT_TIMESTAMP WHERE subasta_id=?",
-				nextVersion, auctionId);
+		reservePayment(request.medioPagoId(), id, request.monto());
+		jdbc.update("""
+				UPDATE app_subasta_estado_vivo SET version=?,retencion_hasta=?,lote_finaliza_estimado_at=?,
+					updated_at=CURRENT_TIMESTAMP
+				WHERE subasta_id=?
+				""", nextVersion, retentionUntil, retentionUntil, auctionId);
+		categories.addPoints(accountEntity(accountId), 1, "puja_aceptada", "puja", id);
 		insertNotification(accountId, "puja_aceptada", "Puja aceptada", "Tu puja es la mejor oferta.", id);
 		if (prior != null && !prior.accountId().equals(accountId)) {
 			insertNotification(prior.accountId(), "puja_superada", "Puja superada",
@@ -86,7 +101,7 @@ public class BidTransactionService {
 				VALUES ('usuario',?,'subasta.puja_aceptada','puja',?,?)
 				""", accountId, id, "{\"subastaId\":" + auctionId + ",\"version\":" + nextVersion + "}");
 		Bid accepted = new Bid(id, auctionId, request.itemCatalogoId(), "aceptada", request.monto(), auction.currency(),
-				sequence, nextVersion, request.monto(), bidderNumber, false);
+				sequence, nextVersion, request.monto(), bidderNumber, false, retentionUntil);
 		return new AcceptedBid(accepted, prior == null || prior.accountId().equals(accountId) ? null : prior.accountId(),
 				false);
 	}
@@ -111,8 +126,11 @@ public class BidTransactionService {
 				|| value.amount().compareTo(request.monto()) != 0) {
 			throw conflict("La clave de idempotencia ya fue utilizada", "IDEMPOTENCY_CONFLICT");
 		}
+		OffsetDateTime retentionUntil = jdbc.queryForObject(
+				"SELECT retencion_hasta FROM app_subasta_estado_vivo WHERE subasta_id=?",
+				OffsetDateTime.class, auctionId);
 		return new Bid(value.id(), value.auctionId(), value.itemId(), value.state(), value.amount(), value.currency(),
-				value.sequence(), value.version(), value.amount(), value.bidderNumber(), true);
+				value.sequence(), value.version(), value.amount(), value.bidderNumber(), true, retentionUntil);
 	}
 
 	private LiveState lockLiveState(Integer auctionId) {
@@ -133,6 +151,10 @@ public class BidTransactionService {
 		return values.get(0);
 	}
 
+	private CuentaApp accountEntity(Long id) {
+		return accounts.findById(id).orElseThrow(() -> notFound("Cuenta inexistente"));
+	}
+
 	private Auction auction(Integer id) {
 		List<Auction> values = jdbc.query("""
 				SELECT s.categoria,e.moneda,e.estado_operativo FROM subastas s
@@ -145,9 +167,9 @@ public class BidTransactionService {
 
 	private Payment payment(Long accountId, Long paymentId) {
 		List<Payment> values = jdbc.query("""
-				SELECT cuenta_id,tipo,moneda,estado,limite_monto,consumo_actual,saldo_garantia,verificado_hasta,deleted_at
+				SELECT id,cuenta_id,tipo,moneda,estado,limite_monto,consumo_actual,saldo_garantia,verificado_hasta,deleted_at
 				FROM app_medios_pago WHERE id=?
-				""", (rs, row) -> new Payment(rs.getLong("cuenta_id"), rs.getString("tipo"), rs.getString("moneda"),
+				""", (rs, row) -> new Payment(rs.getLong("id"), rs.getLong("cuenta_id"), rs.getString("tipo"), rs.getString("moneda"),
 						rs.getString("estado"), rs.getBigDecimal("limite_monto"), rs.getBigDecimal("consumo_actual"),
 						rs.getBigDecimal("saldo_garantia"), rs.getObject("verificado_hasta", OffsetDateTime.class),
 						rs.getObject("deleted_at", OffsetDateTime.class)), paymentId);
@@ -157,14 +179,15 @@ public class BidTransactionService {
 		return payment;
 	}
 
-	private void validatePayment(Payment payment, String currency, BigDecimal amount) {
+	private void validatePayment(Payment payment, String currency, BigDecimal amount, Long ignoredReservationBidId) {
 		if (payment.deletedAt() != null) throw forbidden("El medio de pago fue eliminado", "PAYMENT_METHOD_NOT_VERIFIED");
 		if (!payment.currency().equals(currency)) throw unprocessable("Moneda incompatible", "PAYMENT_METHOD_CURRENCY_MISMATCH");
 		if (!payment.state().equals("verificado")) throw forbidden("El medio de pago no esta verificado", "PAYMENT_METHOD_NOT_VERIFIED");
 		if (payment.verifiedUntil() == null || !payment.verifiedUntil().isAfter(OffsetDateTime.now())) {
 			throw forbidden("La verificacion del medio de pago vencio", "PAYMENT_METHOD_VERIFICATION_EXPIRED");
 		}
-		if (payment.limit() != null && amount.compareTo(payment.limit().subtract(payment.consumed())) > 0) {
+		BigDecimal reserved = activeReservations(payment.id(), ignoredReservationBidId);
+		if (payment.limit() == null || amount.compareTo(payment.limit().subtract(payment.consumed()).subtract(reserved)) > 0) {
 			throw unprocessable("Fondos insuficientes", "PAYMENT_METHOD_INSUFFICIENT_FUNDS");
 		}
 		if (payment.type().equals("cheque_certificado")
@@ -198,12 +221,38 @@ public class BidTransactionService {
 
 	private PriorBid bestBid(Integer auctionId, Integer itemId) {
 		List<PriorBid> values = jdbc.query("""
-				SELECT id,cuenta_id,monto FROM app_pujas_live
+				SELECT id,cuenta_id,medio_pago_id,monto FROM app_pujas_live
 				WHERE subasta_id=? AND item_catalogo_id=? AND estado IN ('aceptada','ganadora')
 				ORDER BY monto DESC,secuencia DESC LIMIT 1
-				""", (rs, row) -> new PriorBid(rs.getLong("id"), rs.getLong("cuenta_id"), rs.getBigDecimal("monto")),
+				""", (rs, row) -> new PriorBid(rs.getLong("id"), rs.getLong("cuenta_id"),
+						rs.getLong("medio_pago_id"), rs.getBigDecimal("monto")),
 				auctionId, itemId);
 		return values.isEmpty() ? null : values.get(0);
+	}
+
+	private BigDecimal activeReservations(Long paymentId, Long ignoredBidId) {
+		String ignoredClause = ignoredBidId == null ? "" : " AND puja_id<>?";
+		Object[] args = ignoredBidId == null ? new Object[] { paymentId } : new Object[] { paymentId, ignoredBidId };
+		BigDecimal value = jdbc.queryForObject("""
+				SELECT COALESCE(SUM(monto),0) FROM app_reservas_medio_pago
+				WHERE medio_pago_id=? AND estado='activa'
+				""" + ignoredClause, BigDecimal.class, args);
+		return value == null ? BigDecimal.ZERO : value;
+	}
+
+	private void releaseReservation(Long bidId) {
+		jdbc.update("""
+				UPDATE app_reservas_medio_pago
+				SET estado='liberada',released_at=CURRENT_TIMESTAMP
+				WHERE puja_id=? AND estado='activa'
+				""", bidId);
+	}
+
+	private void reservePayment(Long paymentId, Long bidId, BigDecimal amount) {
+		jdbc.update("""
+				INSERT INTO app_reservas_medio_pago(medio_pago_id,puja_id,monto,estado)
+				VALUES (?, ?, ?, 'activa')
+				""", paymentId, bidId, amount);
 	}
 
 	private void validateAmount(String category, BigDecimal amount, BigDecimal base, BigDecimal previous) {
@@ -305,9 +354,11 @@ public class BidTransactionService {
 	}
 
 	private String normalizedKey(String value) {
-		return value == null || value.isBlank() ? UUID.randomUUID().toString() : value.trim();
+		if (value == null || value.isBlank()) throw bad("idempotencyKey es obligatorio", "IDEMPOTENCY_KEY_REQUIRED");
+		return value.trim();
 	}
 
+	private BusinessException bad(String message, String code) { return new BusinessException(HttpStatus.BAD_REQUEST, message, code); }
 	private BusinessException forbidden(String message, String code) { return new BusinessException(HttpStatus.FORBIDDEN, message, code); }
 	private BusinessException conflict(String message, String code) { return new BusinessException(HttpStatus.CONFLICT, message, code); }
 	private BusinessException unprocessable(String message, String code) { return new BusinessException(HttpStatus.UNPROCESSABLE_ENTITY, message, code); }
@@ -325,14 +376,14 @@ public class BidTransactionService {
 	private record Auction(String category, String currency, String state) {
 	}
 
-	private record Payment(Long accountId, String type, String currency, String state, BigDecimal limit,
+	private record Payment(Long id, Long accountId, String type, String currency, String state, BigDecimal limit,
 			BigDecimal consumed, BigDecimal guarantee, OffsetDateTime verifiedUntil, OffsetDateTime deletedAt) {
 	}
 
 	private record Item(BigDecimal basePrice, Integer auctionId, Long ownerAccountId) {
 	}
 
-	private record PriorBid(Long id, Long accountId, BigDecimal amount) {
+	private record PriorBid(Long id, Long accountId, Long paymentId, BigDecimal amount) {
 	}
 
 	private record ExistingBid(Long id, Integer auctionId, Integer itemId, Long accountId, Long paymentId,

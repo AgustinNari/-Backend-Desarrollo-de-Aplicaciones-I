@@ -1,6 +1,8 @@
 package com.example.quickbid.quickbid;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
@@ -90,12 +92,26 @@ class AuthIntegrationTests {
 	void registroEtapa2RechazaMimeFalseado() throws Exception {
 		mvc.perform(post("/api/auth/registro/etapa1").contentType(MediaType.APPLICATION_JSON)
 				.content(etapa1("nuevo@quickbid.demo", 32))).andExpect(status().isCreated());
-		MockMultipartFile falso = new MockMultipartFile("fotoFrente", "dni.png", "image/png",
+		MockMultipartFile falso = new MockMultipartFile("fotoFrenteDni", "dni.png", "image/png",
 				"no-es-png".getBytes());
-		MockMultipartFile dorso = new MockMultipartFile("fotoDorso", "dni.png", "image/png",
+		MockMultipartFile dorso = new MockMultipartFile("fotoDorsoDni", "dni.png", "image/png",
 				new byte[] {(byte) 137, 80, 78, 71, 13, 10, 26, 10});
 		mvc.perform(multipart("/api/auth/registro/etapa2").file(falso).file(dorso)
 				.param("email", "nuevo@quickbid.demo"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_FILE"));
+	}
+
+	@Test
+	void registroEtapa2AceptaCamposFinalesYRechazaPdf() throws Exception {
+		mvc.perform(post("/api/auth/registro/etapa1").contentType(MediaType.APPLICATION_JSON)
+				.content(etapa1("dni-final@quickbid.demo", 32))).andExpect(status().isCreated());
+		MockMultipartFile frente = new MockMultipartFile("fotoFrenteDni", "dni.pdf", "application/pdf",
+				"%PDF-1.4".getBytes(StandardCharsets.UTF_8));
+		MockMultipartFile dorso = new MockMultipartFile("fotoDorsoDni", "dni.png", "image/png",
+				new byte[] {(byte) 137, 80, 78, 71, 13, 10, 26, 10});
+		mvc.perform(multipart("/api/auth/registro/etapa2").file(frente).file(dorso)
+				.param("email", "dni-final@quickbid.demo"))
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.errors[0].code").value("INVALID_FILE"));
 	}
@@ -143,21 +159,53 @@ class AuthIntegrationTests {
 	}
 
 	@Test
+	void etapa3UsaSetupTokenYLoMarcaComoUnSoloUso() throws Exception {
+		String raw = "setup-token-final";
+		registrationReadyForSetup(9104, "setup-final@quickbid.demo", raw,
+				"DATEADD('HOUR',48,CURRENT_TIMESTAMP)", "NULL", 2104);
+
+		mvc.perform(post("/api/auth/registro/etapa3").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"setup_token\":\"" + raw + "\",\"clave\":\"Nueva123!\",\"claveConfirmacion\":\"Nueva123!\"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.estadoCuenta").value("activa"))
+				.andExpect(jsonPath("$.data.usuario.email").value("setup-final@quickbid.demo"));
+		assertEquals("completada", jdbc.queryForObject(
+				"SELECT estado FROM app_solicitudes_registro WHERE id=9104", String.class));
+		assertEquals(1, jdbc.queryForObject(
+				"SELECT COUNT(*) FROM app_solicitudes_registro WHERE id=9104 AND setup_token_used_at IS NOT NULL",
+				Integer.class));
+
+		mvc.perform(post("/api/auth/registro/etapa3").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"setup_token\":\"" + raw + "\",\"clave\":\"Nueva123!\",\"claveConfirmacion\":\"Nueva123!\"}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_TOKEN"));
+	}
+
+	@Test
 	void loginPermiteUsuarioActivo() throws Exception {
 		login("aprobado@quickbid.demo").andExpect(status().isOk())
 				.andExpect(jsonPath("$.data.accessToken").isString())
+				.andExpect(jsonPath("$.data.expiresIn").value(900))
+				.andExpect(jsonPath("$.data.estadoCuenta").value("activa"))
 				.andExpect(jsonPath("$.data.usuario.estado").value("activa"));
 	}
 
 	@Test
 	void loginPermiteUsuarioConRestriccionPorMulta() throws Exception {
 		login("multa@quickbid.demo").andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.estadoCuenta").value("restriccion_multa"))
 				.andExpect(jsonPath("$.data.usuario.estado").value("restriccion_multa"));
 	}
 
 	@Test
-	void loginRechazaCuentaBloqueada() throws Exception {
-		login("bloqueado@quickbid.demo").andExpect(status().isForbidden())
+	void loginPermiteCuentaBloqueadaComoSesionLimitada() throws Exception {
+		String json = login("bloqueado@quickbid.demo").andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.accessToken").isString())
+				.andExpect(jsonPath("$.data.estadoCuenta").value("bloqueada_permanente"))
+				.andExpect(jsonPath("$.data.usuario.estado").value("bloqueada_permanente"))
+				.andReturn().getResponse().getContentAsString();
+		mvc.perform(get("/api/auth/sesion").header("Authorization", "Bearer " + accessToken(json)))
+				.andExpect(status().isForbidden())
 				.andExpect(jsonPath("$.errors[0].code").value("ACCOUNT_BLOCKED"));
 	}
 
@@ -169,6 +217,10 @@ class AuthIntegrationTests {
 				.content(refreshBody(original)))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.data.refreshToken").value(not(original)));
+		assertEquals(30, jdbc.queryForObject("""
+				SELECT DATEDIFF('DAY', created_at, expires_at)
+				FROM app_refresh_tokens WHERE token_hash=?
+				""", Integer.class, tokens.hash(original)));
 		mvc.perform(post("/api/auth/refresh").contentType(MediaType.APPLICATION_JSON)
 				.content(refreshBody(original)))
 				.andExpect(status().isUnauthorized());
@@ -198,6 +250,24 @@ class AuthIntegrationTests {
 	}
 
 	@Test
+	void recuperacionGeneraTokenHasheadoSinExponerTokenCrudo() throws Exception {
+		String json = mvc.perform(post("/api/auth/recuperar-clave").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"email\":\"aprobado@quickbid.demo\"}"))
+				.andExpect(status().isOk())
+				.andReturn().getResponse().getContentAsString();
+
+		assertTrue(!json.contains("token_hash"));
+		assertTrue(!json.contains("token-redactado"));
+		String hash = jdbc.queryForObject("""
+				SELECT token_hash FROM app_password_reset_tokens
+				WHERE cuenta_id=3001
+				ORDER BY id DESC LIMIT 1
+				""", String.class);
+		assertNotNull(hash);
+		assertEquals(64, hash.length());
+	}
+
+	@Test
 	void reenvioLinkNoExponeUsuarioInexistenteNiEnviaMail() throws Exception {
 		mvc.perform(post("/api/auth/registro/reenviar-link").contentType(MediaType.APPLICATION_JSON)
 				.content("{\"email\":\"ausente@quickbid.demo\"}"))
@@ -206,6 +276,29 @@ class AuthIntegrationTests {
 				.andExpect(jsonPath("$.errors").isArray());
 
 		assertEquals(0, mail.deliveries().size());
+	}
+
+	@Test
+	void reenvioLinkGeneraTokenNuevoHasheadoYRespuestaGenerica() throws Exception {
+		String raw = "setup-token-reenvio";
+		registrationReadyForSetup(9105, "setup-reenvio@quickbid.demo", raw,
+				"DATEADD('HOUR',48,CURRENT_TIMESTAMP)", "NULL", 2105);
+		String oldHash = jdbc.queryForObject("SELECT setup_token_hash FROM app_solicitudes_registro WHERE id=9105",
+				String.class);
+
+		String json = mvc.perform(post("/api/auth/registro/reenviar-link").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"email\":\"setup-reenvio@quickbid.demo\"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.message").value("Si corresponde, se envio un nuevo enlace"))
+				.andReturn().getResponse().getContentAsString();
+
+		String newHash = jdbc.queryForObject("SELECT setup_token_hash FROM app_solicitudes_registro WHERE id=9105",
+				String.class);
+		assertNotEquals(oldHash, newHash);
+		assertEquals(64, newHash.length());
+		assertTrue(!json.contains("setup_token"));
+		assertTrue(!json.contains("hash"));
+		assertTrue(delivered("token", "registro"));
 	}
 
 	@Test
@@ -250,7 +343,25 @@ class AuthIntegrationTests {
 				""", tokens.hash(raw));
 
 		mvc.perform(put("/api/auth/cambiar-clave").contentType(MediaType.APPLICATION_JSON)
-				.content("{\"token\":\"" + raw + "\",\"clave\":\"Nueva123!\"}"))
+				.content("{\"token\":\"" + raw + "\",\"claveNueva\":\"Nueva123!\",\"claveConfirmacion\":\"Nueva123!\"}"))
+				.andExpect(status().isOk());
+		mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"email\":\"aprobado@quickbid.demo\",\"clave\":\"Nueva123!\"}"))
+				.andExpect(status().isOk());
+	}
+
+	@Test
+	void cambiarClaveDesdeSesionActivaExigeClaveActualYConfirmacion() throws Exception {
+		String access = accessToken(login("aprobado@quickbid.demo").andReturn().getResponse().getContentAsString());
+		mvc.perform(put("/api/auth/cambiar-clave").header("Authorization", "Bearer " + access)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"claveActual\":\"Incorrecta123!\",\"claveNueva\":\"Nueva123!\",\"claveConfirmacion\":\"Nueva123!\"}"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_CURRENT_PASSWORD"));
+
+		mvc.perform(put("/api/auth/cambiar-clave").header("Authorization", "Bearer " + access)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"claveActual\":\"Demo123!\",\"claveNueva\":\"Nueva123!\",\"claveConfirmacion\":\"Nueva123!\"}"))
 				.andExpect(status().isOk());
 		mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
 				.content("{\"email\":\"aprobado@quickbid.demo\",\"clave\":\"Nueva123!\"}"))

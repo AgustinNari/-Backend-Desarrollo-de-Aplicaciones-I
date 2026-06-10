@@ -136,9 +136,12 @@ class AdminIntegrationTests {
 				.andExpect(jsonPath("$.errors[0].code").value("INVALID_FILTER"));
 
 		int before = jdbc.queryForObject("SELECT puntos FROM app_cuentas WHERE id=3001", Integer.class);
-		admin(post("/api/admin/medios-pago/5003/verificar")).andExpect(status().isOk())
+		admin(post("/api/admin/medios-pago/5003/verificar").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"limiteAprobado\":150000}")).andExpect(status().isOk())
 				.andExpect(jsonPath("$.data.estado").value("verificado"));
-		assertEquals(before + 50, jdbc.queryForObject("SELECT puntos FROM app_cuentas WHERE id=3001", Integer.class));
+		assertEquals(before + 30, jdbc.queryForObject("SELECT puntos FROM app_cuentas WHERE id=3001", Integer.class));
+		assertEquals(new BigDecimal("150000.00"),
+				jdbc.queryForObject("SELECT limite_monto FROM app_medios_pago WHERE id=5003", BigDecimal.class));
 
 		jdbc.update("""
 				INSERT INTO app_medios_pago(id,cuenta_id,tipo,moneda,estado,principal,nacional,alias_visible,titular,
@@ -152,6 +155,118 @@ class AdminIntegrationTests {
 				jdbc.queryForObject("SELECT motivo_rechazo FROM app_medios_pago WHERE id=5099", String.class));
 		assertTrue(delivered("notification", "medio_pago_verificado"));
 		assertTrue(delivered("notification", "medio_pago_rechazado"));
+	}
+
+	@Test void adminVerificarMedioExigeLimiteAprobadoYPermiteRevalidar() throws Exception {
+		admin(post("/api/admin/medios-pago/5003/verificar").contentType(MediaType.APPLICATION_JSON)
+				.content("{}")).andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.errors[0].code").value("INVALID_FIELD"));
+
+		jdbc.update("""
+				INSERT INTO app_medios_pago(id,cuenta_id,tipo,moneda,estado,principal,nacional,alias_visible,titular,
+					hash_identificador,limite_monto,consumo_actual,verificado_hasta)
+				VALUES (5096,3001,'tarjeta','ARS','vencido',false,true,'Vencida','Ana','hash-expired-admin',
+					5000,0,DATEADD('DAY',-1,CURRENT_TIMESTAMP))
+				""");
+		admin(post("/api/admin/medios-pago/5096/verificar").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"limiteAprobado\":8000}")).andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.estado").value("verificado"));
+		assertEquals(new BigDecimal("8000.00"),
+				jdbc.queryForObject("SELECT limite_monto FROM app_medios_pago WHERE id=5096", BigDecimal.class));
+		assertEquals(900, jdbc.queryForObject("SELECT puntos FROM app_cuentas WHERE id=3001", Integer.class));
+
+		jdbc.update("""
+				INSERT INTO app_medios_pago(id,cuenta_id,tipo,moneda,estado,principal,nacional,alias_visible,titular,
+					hash_identificador,limite_monto,consumo_actual,verificado_hasta)
+				VALUES (5097,3001,'tarjeta','ARS','verificado',false,true,'Verificada','Ana','hash-verified-admin',
+					6000,0,DATEADD('DAY',2,CURRENT_TIMESTAMP))
+				""");
+		admin(post("/api/admin/medios-pago/5097/verificar").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"limiteAprobado\":9000}")).andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.estado").value("verificado"));
+		assertEquals(new BigDecimal("9000.00"),
+				jdbc.queryForObject("SELECT limite_monto FROM app_medios_pago WHERE id=5097", BigDecimal.class));
+		assertEquals(900, jdbc.queryForObject("SELECT puntos FROM app_cuentas WHERE id=3001", Integer.class));
+	}
+
+	@Test void adminPuedeMarcarMediosExpiradosComoVencidos() throws Exception {
+		jdbc.update("""
+				INSERT INTO app_medios_pago(id,cuenta_id,tipo,moneda,estado,principal,nacional,alias_visible,titular,
+					hash_identificador,limite_monto,consumo_actual,verificado_hasta)
+				VALUES (5095,3001,'tarjeta','ARS','verificado',true,true,'Expirada','Ana','hash-expire-job',
+					1000,0,DATEADD('DAY',-1,CURRENT_TIMESTAMP))
+				""");
+		admin(post("/api/admin/medios-pago/vencer-expirados")).andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.estado").value("procesado"));
+		assertEquals("vencido", jdbc.queryForObject("SELECT estado FROM app_medios_pago WHERE id=5095", String.class));
+		assertEquals(false, jdbc.queryForObject("SELECT principal FROM app_medios_pago WHERE id=5095", Boolean.class));
+	}
+
+	@Test void adminProcesaVencimientosGeneralesYLimpiaNotificacionesAntiguas() throws Exception {
+		jdbc.update("""
+				INSERT INTO app_medios_pago(id,cuenta_id,tipo,moneda,estado,principal,nacional,alias_visible,titular,
+					hash_identificador,limite_monto,consumo_actual,verificado_hasta)
+				VALUES (5094,3001,'tarjeta','ARS','verificado',true,true,'Expirada job','Ana','hash-expire-all',
+					1000,0,DATEADD('DAY',-1,CURRENT_TIMESTAMP))
+				""");
+		jdbc.update("UPDATE app_multas SET vence_at=DATEADD('HOUR',-1,CURRENT_TIMESTAMP) WHERE id=14001");
+		jdbc.update("UPDATE app_compras SET updated_at=DATEADD('HOUR',-73,CURRENT_TIMESTAMP) WHERE id=13002");
+		jdbc.update("""
+				INSERT INTO app_solicitudes_consignacion(id,cuenta_id,cliente_id,titulo,descripcion,segmento,categoria_sugerida,
+					declaracion_propiedad,acepta_devolucion_con_cargo,estado)
+				VALUES (16901,3004,2004,'Devolucion vencida','Demo','arte','comun',true,true,'devolucion_pendiente')
+				""");
+		jdbc.update("""
+				INSERT INTO app_consignacion_devoluciones(id,solicitud_id,motivo,costo,moneda,estado,created_at)
+				VALUES (17901,16901,'Retiro pendiente',0,'ARS','pendiente_retiro',DATEADD('HOUR',-73,CURRENT_TIMESTAMP))
+				""");
+		jdbc.update("""
+				INSERT INTO app_notificaciones(id,cuenta_id,tipo,titulo,descripcion,leida,created_at,read_at)
+				VALUES (18901,3001,'vieja_leida','Vieja','Debe limpiarse',true,DATEADD('DAY',-40,CURRENT_TIMESTAMP),
+					DATEADD('DAY',-31,CURRENT_TIMESTAMP))
+				""");
+		jdbc.update("""
+				INSERT INTO app_notificaciones(id,cuenta_id,tipo,titulo,descripcion,leida,created_at)
+				VALUES (18902,3001,'vieja_no_leida','Vieja','Debe limpiarse',false,DATEADD('DAY',-91,CURRENT_TIMESTAMP))
+				""");
+		jdbc.update("""
+				INSERT INTO app_documentos(id,tipo,referencia_tipo,referencia_id,archivo_id,estado)
+				VALUES (18903,'factura_compra','compra',13002,1,'disponible')
+				""");
+
+		admin(post("/api/admin/vencimientos/procesar")).andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.estado").value("procesado"))
+				.andExpect(jsonPath("$.data.detalle", containsString("Medios vencidos: 1")))
+				.andExpect(jsonPath("$.data.detalle", containsString("multas vencidas: 1")))
+				.andExpect(jsonPath("$.data.detalle", containsString("compras abandonadas: 1")))
+				.andExpect(jsonPath("$.data.detalle", containsString("devoluciones vencidas: 1")))
+				.andExpect(jsonPath("$.data.detalle", containsString("notificaciones eliminadas: 2")));
+
+		assertEquals("vencido", jdbc.queryForObject("SELECT estado FROM app_medios_pago WHERE id=5094", String.class));
+		assertEquals("bloqueada_permanente", jdbc.queryForObject("SELECT estado FROM app_cuentas WHERE id=3002", String.class));
+		assertEquals("abandonada_por_incumplimiento_pago",
+				jdbc.queryForObject("SELECT estado FROM app_compras WHERE id=13002", String.class));
+		assertEquals("devolucion_incompleta",
+				jdbc.queryForObject("SELECT estado FROM app_solicitudes_consignacion WHERE id=16901", String.class));
+		assertEquals(0, count("SELECT COUNT(*) FROM app_notificaciones WHERE id IN (18901,18902)"));
+		assertEquals(1, count("SELECT COUNT(*) FROM app_documentos WHERE id=18903"));
+	}
+
+	@Test void adminProcesadoresDeVencimientosPuntuales() throws Exception {
+		jdbc.update("UPDATE app_multas SET vence_at=DATEADD('HOUR',-1,CURRENT_TIMESTAMP) WHERE id=14001");
+		admin(post("/api/admin/multas/vencer-expiradas")).andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.detalle").value("1 multas vencidas"));
+
+		jdbc.update("UPDATE app_compras SET updated_at=DATEADD('HOUR',-73,CURRENT_TIMESTAMP) WHERE id=13002");
+		admin(post("/api/admin/compras/abandonar-vencidas")).andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.detalle").value("1 compras abandonadas"));
+
+		jdbc.update("""
+				INSERT INTO app_notificaciones(id,cuenta_id,tipo,titulo,descripcion,leida,created_at)
+				VALUES (18904,3001,'vieja','Vieja','Debe limpiarse',false,DATEADD('DAY',-91,CURRENT_TIMESTAMP))
+				""");
+		admin(post("/api/admin/notificaciones/limpiar")).andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.detalle").value("1 notificaciones eliminadas"));
 	}
 
 	@Test void adminCreaAbreYSeteaItemActivo() throws Exception {
@@ -171,6 +286,11 @@ class AdminIntegrationTests {
 		admin(post("/api/admin/subastas/" + id + "/abrir")).andExpect(status().isOk())
 				.andExpect(jsonPath("$.data.estado").value("en_vivo"));
 		assertTrue(delivered("notification", "subasta_inscripta_proxima_inicio"));
+		// Abrir la subasta debe dejar programada la activacion del primer lote para que
+		// el scheduler avance el ciclo de vida sin intervencion manual.
+		assertNotNull(jdbc.queryForObject(
+				"SELECT proximo_lote_programado_at FROM app_subasta_estado_vivo WHERE subasta_id=?",
+				java.time.OffsetDateTime.class, id));
 		admin(post("/api/admin/subastas/6004/item-activo").contentType(MediaType.APPLICATION_JSON)
 				.content("{\"itemCatalogoId\":9006}")).andExpect(status().isOk());
 		assertEquals(9006, jdbc.queryForObject("SELECT item_catalogo_activo_id FROM app_subasta_estado_vivo WHERE subasta_id=6004",
@@ -206,6 +326,16 @@ class AdminIntegrationTests {
 				.andExpect(jsonPath("$.data.estado").value("rechazado"));
 	}
 
+	@Test void adminPuedeMarcarCompraAbandonada() throws Exception {
+		admin(post("/api/admin/compras/13002/abandonar")).andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.estado").value("abandonada"));
+		assertEquals("abandonada_por_incumplimiento_pago",
+				jdbc.queryForObject("SELECT estado FROM app_compras WHERE id=13002", String.class));
+		admin(post("/api/admin/compras/13001/abandonar?retiro=true")).andExpect(status().isOk());
+		assertEquals("abandonada_por_incumplimiento_retiro",
+				jdbc.queryForObject("SELECT estado FROM app_compras WHERE id=13001", String.class));
+	}
+
 	@Test void adminVenceYMarcaPagadaMulta() throws Exception {
 		admin(post("/api/admin/multas/14001/vencer")).andExpect(status().isOk());
 		assertEquals("bloqueada_permanente", jdbc.queryForObject("SELECT estado FROM app_cuentas WHERE id=3002", String.class));
@@ -213,6 +343,7 @@ class AdminIntegrationTests {
 		jdbc.update("UPDATE app_multas SET estado='pendiente' WHERE id=14001");
 		admin(post("/api/admin/multas/14001/marcar-pagada")).andExpect(status().isOk());
 		assertEquals("activa", jdbc.queryForObject("SELECT estado FROM app_cuentas WHERE id=3002", String.class));
+		assertEquals(1, count("SELECT COUNT(*) FROM app_documentos WHERE referencia_id=13001 AND tipo='recibo_multa' AND estado='disponible'"));
 	}
 
 	@Test void adminGestionaRevisionDocumentalYListaConsignaciones() throws Exception {
@@ -222,6 +353,14 @@ class AdminIntegrationTests {
 		assertEquals("documentacion_adicional",
 				jdbc.queryForObject("SELECT estado FROM app_solicitudes_consignacion WHERE id=16001", String.class));
 		assertTrue(delivered("notification", "consignacion_documentacion_requerida"));
+		jdbc.update("""
+				INSERT INTO app_archivos(id,tipo_contexto,filename_original,content_type,size_bytes,storage_path,checksum)
+				VALUES (5291,'documento_consignacion','origen-admin.pdf','application/pdf',123,'demo/origen-admin.pdf','checksum-admin-origin')
+				""");
+		jdbc.update("""
+				INSERT INTO app_consignacion_documentos_origen(id,solicitud_id,archivo_id,estado)
+				VALUES (5292,16001,5291,'pendiente')
+				""");
 		jdbc.update("UPDATE app_solicitudes_consignacion SET estado='documentacion_recibida' WHERE id=16001");
 		admin(post("/api/admin/consignaciones/16001/revisar-documentacion").contentType(MediaType.APPLICATION_JSON)
 				.content("{\"aprobada\":true}")).andExpect(status().isOk());
@@ -267,7 +406,7 @@ class AdminIntegrationTests {
 	}
 
 	private Long consignmentReadyForAgreement(Long accountId) {
-		Long id = consignments.create(accountId, "comun", true, true, "Articulo admin", "Descripcion demo", null,
+		Long id = consignments.create(accountId, "arte", "comun", true, true, "Articulo admin", "Descripcion demo", null,
 				"1980", false, null, null, photos()).id();
 		consignments.approveDigitalReview(id, 1002);
 		consignments.markPhysicalReception(id, 1002);

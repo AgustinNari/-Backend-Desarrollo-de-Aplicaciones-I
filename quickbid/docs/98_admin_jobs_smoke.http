@@ -1,0 +1,39 @@
+# -----------------------------------------------------------------------------
+# QuickBid - 98 admin jobs / vencimientos / limpieza
+# -----------------------------------------------------------------------------
+# Ejecutar al final de un ciclo de pruebas. Modifica estados si hay vencimientos.
+# -----------------------------------------------------------------------------
+
+@baseUrl = http://localhost:8080
+@adminKey = test-admin-key
+
+### 00 - Health
+GET {{baseUrl}}/actuator/health
+
+### 01 - Procesar todos los vencimientos auxiliares
+POST {{baseUrl}}/api/admin/vencimientos/procesar
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### 02 - Medios verificados expirados a vencido
+POST {{baseUrl}}/api/admin/medios-pago/vencer-expirados
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### 03 - Multas expiradas
+POST {{baseUrl}}/api/admin/multas/vencer-expiradas
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### 04 - Compras vencidas por extras
+POST {{baseUrl}}/api/admin/compras/abandonar-vencidas
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### 05 - Devoluciones de consignación vencidas
+POST {{baseUrl}}/api/admin/consignaciones/devoluciones/vencer
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### 06 - Limpiar notificaciones antiguas 30/90
+POST {{baseUrl}}/api/admin/notificaciones/limpiar
+X-QuickBid-Admin-Key: {{adminKey}}
+
+### 07 - Procesar timers de subastas vencidos
+POST {{baseUrl}}/api/admin/subastas/timers/procesar
+X-QuickBid-Admin-Key: {{adminKey}}

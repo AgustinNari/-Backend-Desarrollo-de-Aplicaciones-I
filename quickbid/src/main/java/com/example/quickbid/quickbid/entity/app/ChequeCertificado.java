@@ -1,3 +1,64 @@
 package com.example.quickbid.quickbid.entity.app;
-import java.math.BigDecimal; import java.time.LocalDate; import jakarta.persistence.*;
-@Entity @Table(name="app_cheques_certificados") public class ChequeCertificado {@Id @Column(name="medio_pago_id") private Long medioPagoId; @Column(name="numero_cheque_hash",nullable=false) private String numeroChequeHash; @Column(nullable=false) private BigDecimal monto; @Column(name="fecha_vencimiento",nullable=false) private LocalDate fechaVencimiento; @Column(name="banco_emisor",nullable=false) private String bancoEmisor; @Column(name="foto_anverso_archivo_id",nullable=false) private Long fotoAnversoArchivoId; @Column(name="foto_reverso_archivo_id",nullable=false) private Long fotoReversoArchivoId; protected ChequeCertificado(){} public ChequeCertificado(Long id,String numero,BigDecimal monto,LocalDate fecha,String banco,Long frente,Long dorso){medioPagoId=id;numeroChequeHash=numero;this.monto=monto;fechaVencimiento=fecha;bancoEmisor=banco;fotoAnversoArchivoId=frente;fotoReversoArchivoId=dorso;} public BigDecimal getMonto(){return monto;} public String getBancoEmisor(){return bancoEmisor;}}
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+
+@Entity
+@Table(name = "app_cheques_certificados")
+public class ChequeCertificado {
+
+	@Id
+	@Column(name = "medio_pago_id")
+	private Long medioPagoId;
+
+	@Column(name = "numero_cheque_hash", nullable = false)
+	private String numeroChequeHash;
+
+	@Column(nullable = false)
+	private BigDecimal monto;
+
+	@Column(name = "fecha_vencimiento", nullable = false)
+	private LocalDate fechaVencimiento;
+
+	@Column(name = "banco_emisor", nullable = false)
+	private String bancoEmisor;
+
+	@Column(name = "foto_anverso_archivo_id", nullable = false)
+	private Long fotoAnversoArchivoId;
+
+	@Column(name = "foto_reverso_archivo_id", nullable = false)
+	private Long fotoReversoArchivoId;
+
+	protected ChequeCertificado() {
+	}
+
+	public ChequeCertificado(
+			Long id,
+			String numero,
+			BigDecimal monto,
+			LocalDate fecha,
+			String banco,
+			Long frente,
+			Long dorso) {
+		medioPagoId = id;
+		numeroChequeHash = numero;
+		this.monto = monto;
+		fechaVencimiento = fecha;
+		bancoEmisor = banco;
+		fotoAnversoArchivoId = frente;
+		fotoReversoArchivoId = dorso;
+	}
+
+	public BigDecimal getMonto() {
+		return monto;
+	}
+
+	public String getBancoEmisor() {
+		return bancoEmisor;
+	}
+}

@@ -75,7 +75,11 @@ Privado:
 
 - Nunca enviar precios/montos a invitados.
 - Solo usuarios registrados/aprobados pueden suscribirse a canales live con montos.
-- Cada `CONNECT` exige Bearer JWT valido y cada `SUBSCRIBE` revalida cuenta,
+- El handshake `/ws` puede abrir el transporte sin JWT HTTP; la sesion todavia
+  no queda autenticada ni puede suscribirse.
+- Cada `CONNECT` exige `Authorization: Bearer <accessToken>` como header nativo
+  STOMP, compatible con `connectHeaders` de `@stomp/stompjs`.
+- Cada `SUBSCRIBE` revalida cuenta,
   destino, existencia de subasta y pertenencia del item si corresponde.
 - Antes de entregar cada evento live o privado, revalidar el estado actual de
   la cuenta asociada a la sesion para cortar bloqueos posteriores al subscribe.
@@ -94,3 +98,33 @@ Privado:
 ## Alternativa simple
 
 Si WebSocket se complica, implementar polling para datos no críticos, pero **las pujas deberían usar WebSocket o al menos control transaccional fuerte con refresh frecuente**. La recomendación principal sigue siendo WebSocket.
+
+---
+
+## Addendum post revisión realtime
+
+Eventos/timers recomendados:
+
+- `LOTE_CIERRE_PROGRAMADO`
+- `LOTE_CERRADO`
+- `PROXIMO_LOTE_PROGRAMADO`
+- `LOTE_ACTIVADO`
+- `SUBASTA_CIERRE_PROGRAMADO`
+- `SUBASTA_FINALIZADA`
+- `RESERVA_MEDIO_ACTIVA`
+- `RESERVA_MEDIO_LIBERADA`
+- `RESERVA_MEDIO_CONSUMIDA`
+
+Reglas finales: cierre automático de lote a 60 s sin superación, delay de 60 s antes del siguiente lote y delay de 120 s antes de finalizar subasta completa. Eventos frecuentes como puja superada deben priorizar WebSocket antes que notificación persistente.
+### Timers y ciclo de lotes
+
+- `PUJA_ACEPTADA`, `PUJA_SUPERADA`, `MEJOR_OFERTA_ACTUALIZADA` y
+  `ESTADO_ACTUALIZADO` incluyen `retencionHasta`.
+- `LOTE_ACTIVADO` se publica en `/topic/subastas/{subastaId}/estado` cuando el
+  scheduler avanza al siguiente artículo.
+- `SUBASTA_FINALIZADA` se publica en el mismo topic al cerrar el último lote.
+- La adjudicación ocurre exclusivamente en backend. El frontend sólo muestra el
+  countdown y refresca snapshot al llegar a cero.
+
+El scheduler corre cada `${app.auctions.scheduler-delay-ms:2000}` milisegundos
+y puede deshabilitarse con `app.auctions.scheduler-enabled=false`.

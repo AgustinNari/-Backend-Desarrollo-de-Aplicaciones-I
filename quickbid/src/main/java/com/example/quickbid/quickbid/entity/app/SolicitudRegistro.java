@@ -77,15 +77,82 @@ public class SolicitudRegistro {
 	public String getEstado() {
 		return estado;
 	}
-	public String getNombre(){return nombre;} public String getApellido(){return apellido;}
-	public String getDomicilioLegal(){return domicilioLegal;} public Integer getIdPaisOrigen(){return idPaisOrigen;}
-	public Integer getPersonaId(){return personaId;} public Integer getClienteId(){return clienteId;}
-	public String getSetupTokenHash(){return setupTokenHash;} public OffsetDateTime getSetupTokenExpiresAt(){return setupTokenExpiresAt;}
-	public OffsetDateTime getSetupTokenUsedAt(){return setupTokenUsedAt;}
-	public String getMotivoRechazo(){return motivoRechazo;}
-	public void attachDni(Long frente, Long dorso){fotoFrenteDniArchivoId=frente; fotoDorsoDniArchivoId=dorso; estado="pendiente_revision"; touch();}
-	public void approve(Integer persona, Integer cliente, String hash){personaId=persona; clienteId=cliente; setupTokenHash=hash; setupTokenExpiresAt=OffsetDateTime.now().plusHours(48); estado="aprobada_pendiente_finalizacion"; touch();}
-	public void complete(){setupTokenUsedAt=OffsetDateTime.now(); estado="completada"; touch();}
-	public void reject(String reason){motivoRechazo=reason; estado="rechazado"; touch();}
-	private void touch(){lastActivityAt=OffsetDateTime.now(); updatedAt=lastActivityAt;}
+	public String getNombre() {
+		return nombre;
+	}
+
+	public String getApellido() {
+		return apellido;
+	}
+
+	public String getDomicilioLegal() {
+		return domicilioLegal;
+	}
+
+	public Integer getIdPaisOrigen() {
+		return idPaisOrigen;
+	}
+
+	public Integer getPersonaId() {
+		return personaId;
+	}
+
+	public Integer getClienteId() {
+		return clienteId;
+	}
+
+	public String getSetupTokenHash() {
+		return setupTokenHash;
+	}
+
+	public OffsetDateTime getSetupTokenExpiresAt() {
+		return setupTokenExpiresAt;
+	}
+
+	public OffsetDateTime getSetupTokenUsedAt() {
+		return setupTokenUsedAt;
+	}
+
+	public String getMotivoRechazo() {
+		return motivoRechazo;
+	}
+
+	public void attachDni(Long frente, Long dorso) {
+		fotoFrenteDniArchivoId = frente;
+		fotoDorsoDniArchivoId = dorso;
+		estado = "pendiente_revision";
+		touch();
+	}
+
+	public void approve(Integer persona, Integer cliente, String hash) {
+		personaId = persona;
+		clienteId = cliente;
+		setupTokenHash = hash;
+		setupTokenExpiresAt = OffsetDateTime.now().plusHours(48);
+		estado = "aprobada_pendiente_finalizacion";
+		touch();
+	}
+
+	public void restoreSetupToken(String hash, OffsetDateTime expiresAt) {
+		setupTokenHash = hash;
+		setupTokenExpiresAt = expiresAt;
+		touch();
+	}
+
+	public void complete() {
+		setupTokenUsedAt = OffsetDateTime.now();
+		estado = "completada";
+		touch();
+	}
+
+	public void reject(String reason) {
+		motivoRechazo = reason;
+		estado = "rechazado";
+		touch();
+	}
+
+	private void touch() {
+		lastActivityAt = OffsetDateTime.now();
+		updatedAt = lastActivityAt;
+	}
 }

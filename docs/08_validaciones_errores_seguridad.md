@@ -149,3 +149,20 @@ Crear DTOs separados para:
 - request vs response.
 
 Nunca devolver entidades JPA directamente.
+
+---
+
+## Addendum post revisión de validaciones
+
+- `setup_token` obligatorio en etapa 3.
+- DNI no acepta PDF y requiere `fotoFrenteDni`/`fotoDorsoDni`.
+- Cuenta bloqueada permanente solo obtiene sesión limitada.
+- Verificar/revalidar medio exige `limiteAprobado > 0`.
+- Medio vencido/verificado puede revalidarse reiniciando 5 días hábiles.
+- Inscripción cierra 60 minutos antes y rechazada no bloquea reintento con otro medio.
+- `idempotencyKey` obligatorio en puja.
+- Validar reserva/liberación/consumo de límite.
+- Prohibir puja por producto propio.
+- Comisión sobre precio final ofertado.
+- Compra empresa sin comisión comprador.
+- Consignación: mínimo 6 y máximo 15 fotos; acuerdo requiere checkboxes; `duenio` obligatorio antes de proponer acuerdo, no al iniciar.

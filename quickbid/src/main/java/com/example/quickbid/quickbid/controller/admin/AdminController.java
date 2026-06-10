@@ -27,6 +27,7 @@ import com.example.quickbid.quickbid.dto.admin.AdminDtos.Consignment;
 import com.example.quickbid.quickbid.dto.admin.AdminDtos.Liquidate;
 import com.example.quickbid.quickbid.dto.admin.AdminDtos.OwnerVerification;
 import com.example.quickbid.quickbid.dto.admin.AdminDtos.PaymentMethod;
+import com.example.quickbid.quickbid.dto.admin.AdminDtos.PaymentVerification;
 import com.example.quickbid.quickbid.dto.admin.AdminDtos.Points;
 import com.example.quickbid.quickbid.dto.admin.AdminDtos.PurchaseSimulation;
 import com.example.quickbid.quickbid.dto.admin.AdminDtos.Reason;
@@ -105,8 +106,9 @@ public class AdminController {
 	}
 
 	@PostMapping("/medios-pago/{id}/verificar")
-	public ApiResponse<MedioPagoResponse> verifyPaymentMethod(Authentication authentication, @PathVariable Long id) {
-		return ApiResponse.success(admin.verifyPaymentMethod(id, employeeId(authentication)), "Medio verificado");
+	public ApiResponse<MedioPagoResponse> verifyPaymentMethod(Authentication authentication, @PathVariable Long id,
+			@Valid @RequestBody PaymentVerification request) {
+		return ApiResponse.success(admin.verifyPaymentMethod(id, request.limiteAprobado(), employeeId(authentication)), "Medio verificado");
 	}
 
 	@PostMapping("/medios-pago/{id}/rechazar")
@@ -114,6 +116,36 @@ public class AdminController {
 			@Valid @RequestBody Reason request) {
 		return ApiResponse.success(admin.rejectPaymentMethod(id, request.motivo(), employeeId(authentication)),
 				"Medio rechazado");
+	}
+
+	@PostMapping("/medios-pago/vencer-expirados")
+	public ApiResponse<Status> expirePaymentMethods(Authentication authentication) {
+		return ApiResponse.success(admin.expirePaymentMethods(employeeId(authentication)), "Vencimiento de medios procesado");
+	}
+
+	@PostMapping("/vencimientos/procesar")
+	public ApiResponse<Status> processDueJobs(Authentication authentication) {
+		return ApiResponse.success(admin.processDueJobs(employeeId(authentication)), "Vencimientos procesados");
+	}
+
+	@PostMapping("/multas/vencer-expiradas")
+	public ApiResponse<Status> expireDueFines(Authentication authentication) {
+		return ApiResponse.success(admin.expireDueFines(employeeId(authentication)), "Multas vencidas procesadas");
+	}
+
+	@PostMapping("/compras/abandonar-vencidas")
+	public ApiResponse<Status> abandonDuePurchases(Authentication authentication) {
+		return ApiResponse.success(admin.abandonDuePurchases(employeeId(authentication)), "Compras vencidas procesadas");
+	}
+
+	@PostMapping("/consignaciones/devoluciones/vencer")
+	public ApiResponse<Status> expireDueConsignmentReturns(Authentication authentication) {
+		return ApiResponse.success(admin.expireDueConsignmentReturns(employeeId(authentication)), "Devoluciones vencidas procesadas");
+	}
+
+	@PostMapping("/notificaciones/limpiar")
+	public ApiResponse<Status> cleanupNotifications(Authentication authentication) {
+		return ApiResponse.success(admin.cleanupNotifications(employeeId(authentication)), "Notificaciones antiguas limpiadas");
 	}
 
 	@PostMapping("/subastas")
@@ -150,6 +182,11 @@ public class AdminController {
 		return ApiResponse.success(admin.closeLot(id, resultado, employeeId(authentication)), "Lote cerrado");
 	}
 
+	@PostMapping("/subastas/timers/procesar")
+	public ApiResponse<Status> processAuctionTimers(Authentication authentication) {
+		return ApiResponse.success(admin.processAuctionTimers(employeeId(authentication)), "Timers procesados");
+	}
+
 	@PostMapping("/subastas/{id}/catalogo/items")
 	public ApiResponse<Integer> addCatalogItem(Authentication authentication, @PathVariable Integer id,
 			@Valid @RequestBody CatalogItem request) {
@@ -168,6 +205,12 @@ public class AdminController {
 			@Valid @RequestBody PurchaseSimulation request) {
 		return ApiResponse.success(admin.simulatePayment(id, request, false, employeeId(authentication)),
 				"Falla de pago simulada");
+	}
+
+	@PostMapping("/compras/{id}/abandonar")
+	public ApiResponse<Status> abandonPurchase(Authentication authentication, @PathVariable Long id,
+			@RequestParam(defaultValue = "false") boolean retiro) {
+		return ApiResponse.success(admin.abandonPurchase(id, retiro, employeeId(authentication)), "Compra abandonada");
 	}
 
 	@PostMapping("/multas/{id}/vencer")

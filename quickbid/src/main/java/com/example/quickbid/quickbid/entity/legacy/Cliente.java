@@ -22,7 +22,14 @@ public class Cliente {
 
 	protected Cliente() {
 	}
-	public Cliente(Integer id,Integer pais,Integer verificador){this.identificador=id;this.numeroPais=pais;this.verificador=verificador;this.admitido="si";this.categoria="comun";}
+
+	public Cliente(Integer id, Integer pais, Integer verificador) {
+		this.identificador = id;
+		this.numeroPais = pais;
+		this.verificador = verificador;
+		this.admitido = "si";
+		this.categoria = "comun";
+	}
 
 	public Integer getIdentificador() {
 		return identificador;

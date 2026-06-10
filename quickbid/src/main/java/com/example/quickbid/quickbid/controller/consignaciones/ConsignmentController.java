@@ -26,6 +26,7 @@ import com.example.quickbid.quickbid.dto.response.ConsignmentDtos.Page;
 import com.example.quickbid.quickbid.dto.response.ConsignmentDtos.Requirements;
 import com.example.quickbid.quickbid.dto.response.ConsignmentDtos.Return;
 import com.example.quickbid.quickbid.dto.response.ConsignmentDtos.ReturnPayment;
+import com.example.quickbid.quickbid.dto.response.ConsignmentDtos.ReturnPreview;
 import com.example.quickbid.quickbid.dto.response.ConsignmentDtos.Summary;
 import com.example.quickbid.quickbid.service.ConsignmentService;
 
@@ -48,6 +49,7 @@ public class ConsignmentController {
 	@PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
 	public ResponseEntity<ApiResponse<Detail>> create(Authentication authentication,
 			@RequestParam String segmento,
+			@RequestParam(required = false) String categoriaSubasta,
 			@RequestParam Boolean aceptaTyC,
 			@RequestParam Boolean declaracionPropiedadYOrigenLicito,
 			@RequestParam String titulo,
@@ -58,7 +60,7 @@ public class ConsignmentController {
 			@RequestParam(required = false) String autor,
 			@RequestParam(required = false) String historiaExtendida,
 			@RequestPart List<MultipartFile> fotos) {
-		Detail result = consignments.create(accountId(authentication), segmento, aceptaTyC,
+		Detail result = consignments.create(accountId(authentication), segmento, categoriaSubasta, aceptaTyC,
 				declaracionPropiedadYOrigenLicito, titulo, descripcion, historia, fechaAproximada,
 				esObraDeArte, autor, historiaExtendida, fotos);
 		return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(result, "Consignacion creada"));
@@ -105,6 +107,13 @@ public class ConsignmentController {
 			@Valid @RequestBody ConsignmentReturnRequest request) {
 		return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(
 				consignments.selectReturn(accountId(authentication), id, request), "Devolucion registrada"));
+	}
+
+	@PostMapping("/{id}/devolucion/preview")
+	public ApiResponse<ReturnPreview> returnPreview(Authentication authentication, @PathVariable Long id,
+			@Valid @RequestBody ConsignmentReturnRequest request) {
+		return ApiResponse.success(consignments.previewReturn(accountId(authentication), id, request),
+				"Cotizacion de devolucion");
 	}
 
 	@PostMapping("/{id}/devolucion/pagar-envio")

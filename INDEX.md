@@ -1,3 +1,6 @@
+> **Actualización post revisión:** este paquete ahora incluye `docs/00_decisiones_finales.md`, `docs/API_CONTRATO_FINAL.md` y `docs/10_plan_correcciones_backend.md`. Esos archivos son la fuente final para Codex.
+
+
 # Índice del paquete QuickBid Backend para Codex
 
 Este paquete está pensado para copiarlo dentro del repositorio del backend o entregárselo completo a Codex.

@@ -1,1 +1,8 @@
-package com.example.quickbid.quickbid.repository.app; import org.springframework.data.jpa.repository.JpaRepository; import com.example.quickbid.quickbid.entity.app.CuentaBancaria; public interface CuentaBancariaRepository extends JpaRepository<CuentaBancaria,Long>{}
+package com.example.quickbid.quickbid.repository.app;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import com.example.quickbid.quickbid.entity.app.CuentaBancaria;
+
+public interface CuentaBancariaRepository extends JpaRepository<CuentaBancaria, Long> {
+}
