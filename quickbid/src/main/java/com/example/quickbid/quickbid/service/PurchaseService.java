@@ -202,12 +202,13 @@ public class PurchaseService {
 		}
 		jdbc.update("UPDATE \"itemsCatalogo\" SET subastado='si' WHERE identificador=?", item.id());
 		long nextVersion = live.version() + 1;
-		scheduleAfterLotClose(auctionId, nextVersion);
+		LotSchedule schedule = scheduleAfterLotClose(auctionId, nextVersion);
 		notifyOwner(item.id(), purchaseId);
 		audit.record(new AuditEvent("sistema", null, "subasta.lote_cerrado", "compra", purchaseId,
 				"{\"subastaId\":" + auctionId + ",\"itemId\":" + item.id() + "}"));
 		realtime.afterCommit(new LotClosedEvent("LOTE_CERRADO", auctionId, item.id(), purchaseId, winningBidId, amount,
-				auction.currency(), winning == null, nextVersion), buyerAccountId);
+				auction.currency(), winning == null, nextVersion, schedule.nextLotAt(), schedule.closeAuctionAt()),
+				buyerAccountId);
 		return internalDetail(purchaseId);
 	}
 
@@ -218,8 +219,17 @@ public class PurchaseService {
 		jdbc.update("UPDATE app_subasta_ext SET estado_operativo='finalizada',updated_at=CURRENT_TIMESTAMP WHERE subasta_id=?",
 				auctionId);
 		jdbc.update("UPDATE subastas SET estado='cerrada' WHERE identificador=?", auctionId);
+		// El cierre tambien es un cambio de estado versionado: se incrementa la version y se
+		// limpia la programacion pendiente para que el scheduler no vuelva a procesar la subasta.
+		long nextVersion = live.version() + 1;
+		jdbc.update("""
+				UPDATE app_subasta_estado_vivo
+				SET version=?,retencion_hasta=NULL,lote_finaliza_estimado_at=NULL,
+					proximo_lote_programado_at=NULL,subasta_finaliza_programado_at=NULL,updated_at=CURRENT_TIMESTAMP
+				WHERE subasta_id=?
+				""", nextVersion, auctionId);
 		audit.record(new AuditEvent("sistema", null, "subasta.cerrada", "subasta", auctionId.longValue(), "{}"));
-		realtime.afterCommit(new AuctionLifecycleEvent("SUBASTA_FINALIZADA", auctionId, null, live.version()));
+		realtime.afterCommit(new AuctionLifecycleEvent("SUBASTA_FINALIZADA", auctionId, null, nextVersion));
 	}
 
 	@Transactional
@@ -582,7 +592,7 @@ public class PurchaseService {
 		return value == null ? BigDecimal.ZERO : value;
 	}
 
-	private void scheduleAfterLotClose(Integer auctionId, long nextVersion) {
+	private LotSchedule scheduleAfterLotClose(Integer auctionId, long nextVersion) {
 		OffsetDateTime now = OffsetDateTime.now();
 		Integer remaining = jdbc.queryForObject("""
 				SELECT COUNT(*) FROM "itemsCatalogo" i
@@ -597,6 +607,10 @@ public class PurchaseService {
 					proximo_lote_programado_at=?,subasta_finaliza_programado_at=?,updated_at=CURRENT_TIMESTAMP
 				WHERE subasta_id=?
 				""", nextVersion, nextLotAt, closeAuctionAt, auctionId);
+		return new LotSchedule(nextLotAt, closeAuctionAt);
+	}
+
+	private record LotSchedule(OffsetDateTime nextLotAt, OffsetDateTime closeAuctionAt) {
 	}
 
 	private void updateConsignment(Integer itemId, String state) {

@@ -32,6 +32,7 @@ import com.example.quickbid.quickbid.dto.response.ConsignmentDtos.Liquidation;
 import com.example.quickbid.quickbid.dto.response.MedioPagoResponse;
 import com.example.quickbid.quickbid.dto.response.PurchaseDtos.Detail;
 import com.example.quickbid.quickbid.dto.response.PurchaseDtos.Payment;
+import com.example.quickbid.quickbid.dto.response.SubastaDtos.AuctionLifecycleEvent;
 import com.example.quickbid.quickbid.entity.app.CuentaApp;
 import com.example.quickbid.quickbid.exception.BusinessException;
 import com.example.quickbid.quickbid.repository.app.AdminQueryRepository;
@@ -40,6 +41,7 @@ import com.example.quickbid.quickbid.repository.app.CuentaAppRepository;
 import com.example.quickbid.quickbid.repository.app.SolicitudRegistroRepository;
 import com.example.quickbid.quickbid.repository.legacy.ClienteRepository;
 import com.example.quickbid.quickbid.service.PurchaseService.PaymentOutcome;
+import com.example.quickbid.quickbid.websocket.PurchaseRealtimePublisher;
 
 @Service
 public class AdminService {
@@ -60,13 +62,14 @@ public class AdminService {
 	private final MailNotificationService mail;
 	private final AdminQueryRepository queries;
 	private final AuctionQueryRepository auctionQueries;
+	private final PurchaseRealtimePublisher realtime;
 
 	public AdminService(JdbcTemplate jdbc, SolicitudRegistroRepository registrations,
 			RegistrationApprovalService registrationApproval, CuentaAppRepository accounts, ClienteRepository clients,
 			CategoriaService categories, MedioPagoService paymentMethods, PurchaseService purchases,
 			AuctionTimerService auctionTimers, ConsignmentService consignments, AuditService audit,
 			Environment environment, MailNotificationService mail, AdminQueryRepository queries,
-			AuctionQueryRepository auctionQueries) {
+			AuctionQueryRepository auctionQueries, PurchaseRealtimePublisher realtime) {
 		this.jdbc = jdbc;
 		this.registrations = registrations;
 		this.registrationApproval = registrationApproval;
@@ -82,6 +85,7 @@ public class AdminService {
 		this.mail = mail;
 		this.queries = queries;
 		this.auctionQueries = auctionQueries;
+		this.realtime = realtime;
 	}
 
 	@Transactional(readOnly = true)
@@ -251,6 +255,7 @@ public class AdminService {
 		jdbc.update("UPDATE subastas SET estado='abierta' WHERE identificador=?", id);
 		jdbc.update("UPDATE app_subasta_ext SET estado_operativo='en_vivo',updated_at=CURRENT_TIMESTAMP WHERE subasta_id=?", id);
 		if (becameLive) {
+			Long version = startLiveLifecycle(id);
 			auctionQueries.findNotificationRecipientsForAuctionStart(id).forEach(accountId -> {
 				jdbc.update("""
 						INSERT INTO app_notificaciones(cuenta_id,tipo,titulo,descripcion,referencia_tipo,referencia_id)
@@ -259,9 +264,33 @@ public class AdminService {
 						""", accountId, id);
 				mail.critical(accountId, "subasta_inscripta_proxima_inicio");
 			});
+			realtime.afterCommit(new AuctionLifecycleEvent("SUBASTA_INICIADA", id, null, version));
 		}
 		audit(employeeId, "subasta.abierta", "subasta", id.longValue());
 		return auction(id);
+	}
+
+	/**
+	 * Deja el estado vivo listo para que el scheduler active el primer lote sin
+	 * intervencion manual: sin lote activo y con el proximo lote programado de inmediato.
+	 * Devuelve la version resultante para publicarla en el evento de inicio.
+	 */
+	private Long startLiveLifecycle(Integer auctionId) {
+		int updated = jdbc.update("""
+				UPDATE app_subasta_estado_vivo
+				SET item_catalogo_activo_id=NULL,version=version+1,retencion_hasta=NULL,
+					lote_finaliza_estimado_at=NULL,proximo_lote_programado_at=CURRENT_TIMESTAMP,
+					subasta_finaliza_programado_at=NULL,updated_at=CURRENT_TIMESTAMP
+				WHERE subasta_id=?
+				""", auctionId);
+		if (updated == 0) {
+			jdbc.update("""
+					INSERT INTO app_subasta_estado_vivo(subasta_id,version,usuarios_conectados,proximo_lote_programado_at)
+					VALUES (?,1,0,CURRENT_TIMESTAMP)
+					""", auctionId);
+		}
+		return jdbc.queryForObject("SELECT version FROM app_subasta_estado_vivo WHERE subasta_id=?", Long.class,
+				auctionId);
 	}
 
 	public Status closeAuction(Integer id, Integer employeeId) {
@@ -274,12 +303,18 @@ public class AdminService {
 	public Status setActiveItem(Integer id, Integer itemId, Integer employeeId) {
 		requireAuction(id);
 		if (!auctionQueries.existsAuctionItem(id, itemId)) throw bad("El item no pertenece a la subasta", "INVALID_AUCTION_ITEM");
+		OffsetDateTime lotDeadline = OffsetDateTime.now().plusSeconds(60);
 		jdbc.update("""
 				UPDATE app_subasta_estado_vivo SET item_catalogo_activo_id=?,version=version+1,
 					lote_iniciado_at=CURRENT_TIMESTAMP,retencion_hasta=NULL,lote_finaliza_estimado_at=?,
 					proximo_lote_programado_at=NULL,subasta_finaliza_programado_at=NULL,updated_at=CURRENT_TIMESTAMP
 				WHERE subasta_id=?
-				""", itemId, OffsetDateTime.now().plusSeconds(60), id);
+				""", itemId, lotDeadline, id);
+		// La activacion manual debe publicar el mismo evento que la activacion automatica
+		// del scheduler; de lo contrario los clientes conectados quedan desincronizados.
+		Long version = jdbc.queryForObject("SELECT version FROM app_subasta_estado_vivo WHERE subasta_id=?",
+				Long.class, id);
+		realtime.afterCommit(new AuctionLifecycleEvent("LOTE_ACTIVADO", id, itemId, version, lotDeadline));
 		audit(employeeId, "subasta.item_activo_actualizado", "subasta", id.longValue());
 		return new Status("item_activo", "Item activo " + itemId);
 	}

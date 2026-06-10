@@ -96,16 +96,17 @@ public class AuctionTimerService {
 	}
 
 	private void activateItem(Integer auctionId, Integer itemId) {
+		OffsetDateTime lotDeadline = OffsetDateTime.now().plusSeconds(LOT_IDLE_SECONDS);
 		jdbc.update("""
 				UPDATE app_subasta_estado_vivo
 				SET item_catalogo_activo_id=?,version=version+1,lote_iniciado_at=CURRENT_TIMESTAMP,
 					retencion_hasta=NULL,lote_finaliza_estimado_at=?,proximo_lote_programado_at=NULL,
 					subasta_finaliza_programado_at=NULL,updated_at=CURRENT_TIMESTAMP
 				WHERE subasta_id=?
-				""", itemId, OffsetDateTime.now().plusSeconds(LOT_IDLE_SECONDS), auctionId);
+				""", itemId, lotDeadline, auctionId);
 		Long version = jdbc.queryForObject("SELECT version FROM app_subasta_estado_vivo WHERE subasta_id=?",
 				Long.class, auctionId);
-		realtime.afterCommit(new AuctionLifecycleEvent("LOTE_ACTIVADO", auctionId, itemId, version));
+		realtime.afterCommit(new AuctionLifecycleEvent("LOTE_ACTIVADO", auctionId, itemId, version, lotDeadline));
 	}
 
 	public record TimerResult(int lotesCerrados, int lotesActivados, int subastasFinalizadas) {

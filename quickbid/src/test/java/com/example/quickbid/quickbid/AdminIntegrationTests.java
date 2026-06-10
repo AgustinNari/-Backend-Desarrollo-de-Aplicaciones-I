@@ -286,6 +286,11 @@ class AdminIntegrationTests {
 		admin(post("/api/admin/subastas/" + id + "/abrir")).andExpect(status().isOk())
 				.andExpect(jsonPath("$.data.estado").value("en_vivo"));
 		assertTrue(delivered("notification", "subasta_inscripta_proxima_inicio"));
+		// Abrir la subasta debe dejar programada la activacion del primer lote para que
+		// el scheduler avance el ciclo de vida sin intervencion manual.
+		assertNotNull(jdbc.queryForObject(
+				"SELECT proximo_lote_programado_at FROM app_subasta_estado_vivo WHERE subasta_id=?",
+				java.time.OffsetDateTime.class, id));
 		admin(post("/api/admin/subastas/6004/item-activo").contentType(MediaType.APPLICATION_JSON)
 				.content("{\"itemCatalogoId\":9006}")).andExpect(status().isOk());
 		assertEquals(9006, jdbc.queryForObject("SELECT item_catalogo_activo_id FROM app_subasta_estado_vivo WHERE subasta_id=6004",
